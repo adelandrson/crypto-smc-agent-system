@@ -100,44 +100,55 @@ def structure_sl(direction: int, entry: float, nearest_fvg: Optional[dict],
         return ref * (1 + buffer)
 
 
-# Ladder TP berkala SWING per jumlah level (2..4), fraksi total = 100% (tanpa moonbag).
+# Ladder TP berkala SWING per JUMLAH level (1..3, max 3 per spec final user), fraksi total=100%.
+# R-multiple = penempatan SEMENTARA; JUMLAH level dipisah dari PENEMPATAN level (spec).
 _SWING_LADDERS = {
+    1: [("TP1", 3.0, 1.00, {})],
     2: [("TP1", 2.0, 0.50, {"mode": "be"}),
         ("TP2", 4.0, 0.50, {})],
     3: [("TP1", 2.0, 0.40, {"mode": "be"}),
         ("TP2", 3.5, 0.35, {"mode": "lock", "lock_label": "TP1"}),
         ("TP3", 5.0, 0.25, {})],
-    4: [("TP1", 2.0, 0.30, {"mode": "be"}),
-        ("TP2", 3.5, 0.25, {"mode": "lock", "lock_label": "TP1"}),
-        ("TP3", 5.0, 0.25, {"mode": "trail", "value": 0.05}),
-        ("TP4", 7.0, 0.20, {})],
 }
 
 
-def swing_levels(confluence: dict) -> int:
-    """Jumlah TP berkala SWING (2..4) dari 'probabilitas' analisa. Keyakinan tinggi -> lebih
-    banyak level (biarkan winner lari). Sinyal: |full_score|, high_confluence, confirmed."""
-    score = abs(confluence.get("full_score", confluence.get("analysis_score", 0)) or 0)
-    n = 2
-    if score >= 3 or confluence.get("high_confluence"):
-        n += 1
-    if score >= 4 or (confluence.get("high_confluence") and confluence.get("confirmed")):
-        n += 1
-    return max(2, min(4, n))
+def swing_tp_count(vol_state, atr_percentile=None) -> int:
+    """Jumlah TP berkala SWING (1..3) dari VOLATILITY STATE + ATR — deterministik & backtest-able
+    (spec final user), BUKAN confluence score (score = kualitas entry, bukan jumlah TP).
+    trending/breakout -> harga bisa lari jauh -> 3 level; ranging -> cepat ambil untung -> 1;
+    mixed -> 2. ATR sangat rendah (<0.3) turunkan 1 (range sempit, target jauh tak realistis)."""
+    if vol_state in ("trending", "breakout"):
+        n = 3
+    elif vol_state == "ranging":
+        n = 1
+    else:
+        n = 2
+    if atr_percentile is not None and atr_percentile < 0.3 and n > 1:
+        n -= 1
+    return max(1, min(3, n))
 
 
-def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp", levels: int = 3):
+def entry_plan(direction: int, price: float, nearest_fvg, in_zone: bool,
+               max_pullback: float = 0.05, min_pullback: float = 0.0015):
+    """Entry FLEKSIBEL (bukan limit-only/market-only). Harga kini SUDAH di zona entry (FVG/OB/OTE)
+    -> MARKET (masuk sekarang, area valid). Belum -> LIMIT di retest zona. Return (entry, order_type)."""
+    if in_zone:
+        return price, "market"
+    return limit_entry(direction, price, nearest_fvg, max_pullback, min_pullback), "limit"
+
+
+def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp", levels: int = 2):
     """Rencana take-profit.
 
     mode='scalp' — MAIN CEPAT: SATU TP tutup 100% di 2R, tanpa TP berkala/SL-evolution.
-    mode='swing' — TP BERKALA dinamis 2..4 level (fixed, sum=100%) sesuai `levels` (dari
-        `swing_levels`); R 2R->7R; SL evolution BE->lock-TP1->trailing di level antara.
+    mode='swing' — TP BERKALA 1..3 level (fixed, sum=100%) sesuai `levels` (dari swing_tp_count:
+        Volatility+ATR); SL evolution BE->lock-TP1 di level antara.
     """
     R = abs(entry - sl)
     if mode == "scalp":
         plan = [("TP1", 2.0, 1.00, {})]                      # 100% sekaligus (main cepat)
     else:  # swing
-        plan = _SWING_LADDERS[levels if levels in _SWING_LADDERS else 3]
+        plan = _SWING_LADDERS[levels if levels in _SWING_LADDERS else 2]
     return [{"label": lbl, "price": entry + direction * mult * R,
              "frac": frac, "filled": False, "sl_after": sa}
             for lbl, mult, frac, sa in plan]

@@ -142,6 +142,7 @@ def analyze_confluence(candles_or_bars, fvg_config=None, fib_config=None,
         "high_confluence": high_confluence,   # A+ setup flag (now incl. OB retest)
         "momentum_score": momentum_score,     # RSI divergence leg (confirmation)
         "vol_state": vol_state,               # trending/breakout/ranging/mixed
+        "atr_percentile": mom.get("atr_percentile") if mom.get("ok") else None,  # 0..1 (jumlah TP swing)
         "ranging": ranging,                   # SKIP filter (scalp)
         "volume_ok": volume_ok,               # SKIP filter (volume anomaly)
         "volume_z": mom.get("volume_z") if mom.get("ok") else None,

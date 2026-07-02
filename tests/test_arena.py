@@ -138,12 +138,10 @@ def test_manage_position_sl_hit_closes_with_loss():
         assert len(fills) == 1 and fills[0].label == "SL"
 
 
-def test_manage_position_swing_4level_ladder_be_lock_trail():
-    """Swing 4-level: BE -> lock TP1 -> trailing 5% -> TP4 fixed tutup penuh. Trailing SL
-    DIEVALUASI ULANG tiap bar (ratchet di awal `manage_position` thd `close` bar ITU) — `low`
-    tiap bar dijaga di atas SL terbaru supaya tak exit prematur."""
-    # Swing 4-level (R=5 dari entry100/sl95): TP1 110(BE), TP2 117.5(lock), TP3 125(trail5%), TP4 135(tutup)
-    swing_decide = dict(LONG_DECIDE, tps=tp_targets(1, 100.0, 95.0, mode="swing", levels=4))
+def test_manage_position_swing_3level_ladder_be_lock():
+    """Swing 3-level (max baru): BE -> lock TP1 -> TP3 fixed tutup penuh. R=5 dari entry100/sl95:
+    TP1 110(BE), TP2 117.5(lock TP1), TP3 125(tutup)."""
+    swing_decide = dict(LONG_DECIDE, tps=tp_targets(1, 100.0, 95.0, mode="swing", levels=3))
     Mk = _mk_session()
     with Mk() as s:
         tr = arena.open_trade(s, "swing", "ETH", swing_decide)
@@ -151,12 +149,20 @@ def test_manage_position_swing_4level_ladder_be_lock_trail():
         assert tr.status == "open"
         arena.manage_position(s, tr, high=118.0, low=111.0, close=118)     # TP2@117.5 -> lock TP1(110)
         assert tr.status == "open"
-        arena.manage_position(s, tr, high=125.5, low=120.0, close=126)     # TP3@125 -> trail5%: SL=126*.95=119.7; low>itu
-        assert tr.status == "open" and tr.trail == pytest.approx(0.05)
-        events = arena.manage_position(s, tr, high=135.5, low=130.0, close=136)  # TP4@135 (level akhir) -> tutup penuh
+        events = arena.manage_position(s, tr, high=125.5, low=118.0, close=126)  # TP3@125 (akhir) -> tutup penuh
         assert tr.status == "closed" and tr.outcome == "tp_full"
         assert tr.qty_remaining == 0.0 and tr.r_multiple is not None and tr.r_multiple > 0
-        assert any("TP4" in e for e in events)
+        assert any("TP3" in e for e in events)
+
+
+def test_open_market_immediate_fill_with_slippage():
+    """order_type=market -> open_market: isi seketika (status open) di harga + slippage taker."""
+    Mk = _mk_session()
+    with Mk() as s:
+        tr = arena.open_market(s, "scalp", "BTC", LONG_DECIDE, mark=100.0)
+        assert tr.status == "open" and tr.entry_ts is not None
+        assert tr.entry > LONG_DECIDE["entry"]        # slippage adverse (long fill lebih tinggi)
+        assert tr.realized_pnl_usd < 0                # fee taker dipotong
 
 
 def test_moonbag_honors_own_trail_when_it_differs(monkeypatch):

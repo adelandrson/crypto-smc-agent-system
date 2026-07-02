@@ -116,27 +116,48 @@ def test_open_long_sizing_leverage_margin(monkeypatch):
 
 
 def test_open_short_zone_premium_swing_dynamic_tp(monkeypatch):
-    # full_score -3 -> swing_levels = 3 TP berkala (fixed, sum=100%, tanpa moonbag)
-    _patch(monkeypatch, _c(full_score=-3, zone="premium", price=100.0, high_confluence=False,
+    # vol_state trending -> 3 TP berkala (fixed, sum=100%, tanpa moonbag)
+    _patch(monkeypatch, _c(full_score=-3, zone="premium", price=100.0, vol_state="trending",
                             nearest_fvg={"bottom": 104.0, "top": 106.0},
                             structure={"last_swing_low": 90.0, "last_swing_high": 108.0}))
     d = decide("ETH", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)
     assert d["action"] == "open" and d["direction"] == -1
     assert d["sl"] > d["entry"]          # short SL di atas entry
     assert d["tps"][0]["price"] < d["entry"]
-    assert len(d["tps"]) == 3             # score 3 -> 3 level
+    assert len(d["tps"]) == 3             # trending -> 3 level
     assert all(t["price"] is not None for t in d["tps"])   # tak ada moonbag
     assert abs(sum(t["frac"] for t in d["tps"]) - 1.0) < 1e-9
 
 
-def test_swing_tp_count_scales_with_conviction(monkeypatch):
-    """Keyakinan lebih tinggi -> lebih banyak TP berkala (2..4)."""
-    base = dict(zone="premium", price=100.0, nearest_fvg={"bottom": 104.0, "top": 106.0},
+def test_swing_tp_count_by_volatility(monkeypatch):
+    """Jumlah TP swing dari VOLATILITY STATE + ATR (bukan confluence). trending/breakout->3,
+    mixed->2, ranging->1; ATR sangat rendah (<0.3) turunkan 1."""
+    base = dict(full_score=-3, zone="premium", price=100.0, nearest_fvg={"bottom": 104.0, "top": 106.0},
                 structure={"last_swing_low": 90.0, "last_swing_high": 108.0})
-    _patch(monkeypatch, _c(full_score=-2, high_confluence=False, **base))
-    assert len(decide("E", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)["tps"]) == 2
-    _patch(monkeypatch, _c(full_score=-4, high_confluence=True, confirmed=True, **base))
-    assert len(decide("E", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)["tps"]) == 4
+
+    def n(vol, atr=None):
+        _patch(monkeypatch, _c(vol_state=vol, atr_percentile=atr, **base))
+        return len(decide("E", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)["tps"])
+
+    assert n("trending") == 3 and n("breakout") == 3
+    assert n("mixed") == 2 and n(None) == 2
+    assert n("ranging") == 1
+    assert n("trending", 0.2) == 2       # ATR rendah -> turun 1
+
+
+def test_decide_market_entry_when_price_in_zone(monkeypatch):
+    """Harga kini di dalam FVG -> order_type=market (bukan limit)."""
+    _patch(monkeypatch, _c(full_score=3, zone="discount", price=97.0,   # 95<=97<=99 -> di zona
+                            nearest_fvg={"bottom": 95.0, "top": 99.0},
+                            structure={"last_swing_low": 94.0, "last_swing_high": 110.0}))
+    d = decide("BTC", [], 1, 1, 1000.0, GROUPS["scalp"], lsr_score=1)
+    assert d["action"] == "open" and d["order_type"] == "market" and d["entry"] == 97.0
+    # harga di luar zona -> limit
+    _patch(monkeypatch, _c(full_score=3, zone="discount", price=100.0,
+                            nearest_fvg={"bottom": 95.0, "top": 96.0},
+                            structure={"last_swing_low": 94.0, "last_swing_high": 110.0}))
+    d2 = decide("BTC", [], 1, 1, 1000.0, GROUPS["scalp"], lsr_score=1)
+    assert d2["order_type"] == "limit" and d2["entry"] == 96.0
 
 
 def test_margin_cap_shrinks_notional_not_risk_target(monkeypatch):

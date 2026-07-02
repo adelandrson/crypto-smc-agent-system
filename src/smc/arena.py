@@ -119,6 +119,27 @@ def cancel_pending(s, tr: DryRunTrade, reason: str) -> str:
     return f"{tr.symbol} LIMIT {tr.leg} batal — {reason}"
 
 
+def open_market(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
+    """Entry MARKET (order_type='market'): harga kini SUDAH di zona entry -> isi SEKETIKA di harga
+    pasar dgn slippage TAKER (bukan menunggu pullback). status=open langsung, fee taker dipotong."""
+    direction = d["direction"]
+    fill = d["entry"] * (1 + direction * SLIPPAGE)   # slippage adverse (taker fill)
+    fee = _fee(fill, d["qty"])
+    now = _now()
+    tr = DryRunTrade(
+        agent=_agent(group), group=group, symbol=symbol, leg=("long" if direction > 0 else "short"),
+        status="open", placed_ts=now, mark_price=mark, entry_ts=now, entry=fill, sl=d["sl"],
+        original_qty=d["qty"], qty_remaining=d["qty"], leverage=d["leverage"],
+        risk_frac=d["risk_frac"], risk_usd=d["risk_usd"], margin_usd=d["margin_usd"],
+        tps=json.dumps(d["tps"]), full_score=d["full_score"], zone=d["zone"],
+        high_confluence=d["high_confluence"], fr_score=d.get("fr_score"),
+        oi_score=d.get("oi_score"), lsr_score=d.get("lsr_score"), realized_pnl_usd=-fee,
+    )
+    s.add(tr)
+    s.commit()
+    return tr
+
+
 def open_trade(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
     """Konvenien: pasang pending LALU langsung isi (fill seketika di harga limit). Dipakai
     saat entry ingin dieksekusi tanpa menunggu (mis. test, atau harga sudah di zona)."""
@@ -364,9 +385,12 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), candles[-1][4])
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
             _snapshot(s, group, sym, d)
-            # slot dihitung dari active (pending+open); pasang LIMIT order PENDING, bukan market
+            # slot dari active (pending+open). Entry FLEKSIBEL: market=isi seketika, limit=pending
             if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:
-                place_pending(s, group, sym, d, mark=candles[-1][4])   # commit sendiri
+                if d.get("order_type") == "market":
+                    open_market(s, group, sym, d, mark=candles[-1][4])
+                else:
+                    place_pending(s, group, sym, d, mark=candles[-1][4])
                 placed += 1
             s.commit()
     return placed

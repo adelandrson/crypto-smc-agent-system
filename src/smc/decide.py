@@ -9,7 +9,7 @@ tak tersentuh.
 from __future__ import annotations
 
 from src.smc.confluence import analyze_confluence, fib_preset
-from src.smc.risk import limit_entry, position_size, structure_sl, swing_levels, tp_targets
+from src.smc.risk import entry_plan, position_size, structure_sl, swing_tp_count, tp_targets
 
 # ── konfigurasi per-gaya (penyesuaian eksplisit user, lihat plan) ──
 GROUPS = {
@@ -64,11 +64,16 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     if cfg.get("enforce_zone", True) and (
             (direction > 0 and c["zone"] != "discount") or (direction < 0 and c["zone"] != "premium")):
         return {"action": "skip", "reason": f"zone {c['zone']} blocks {direction}", "confluence": c}
-    # LIMIT ORDER: entry = retest zona imbalance (bukan market di harga kini). Arena memasang
-    # order PENDING di harga ini & menunggu pullback mengisinya (lihat arena.check_pending).
-    entry = limit_entry(direction, c["price"], c["nearest_fvg"],
-                        max_pullback=cfg.get("limit_max_pullback", 0.05),
-                        min_pullback=cfg.get("limit_min_pullback", 0.0015))
+    # ENTRY FLEKSIBEL: kalau harga kini SUDAH di zona entry (FVG/OB/OTE) -> MARKET (masuk skrg);
+    # kalau belum -> LIMIT di retest zona (arena pasang pending, tunggu pullback).
+    fvg = c["nearest_fvg"]
+    price = c["price"]
+    in_fvg = bool(fvg and fvg.get("bottom") is not None and fvg.get("top") is not None
+                  and fvg["bottom"] <= price <= fvg["top"])
+    in_zone = in_fvg or c.get("in_ote") or c.get("in_golden_pocket")
+    entry, order_type = entry_plan(direction, price, fvg, in_zone,
+                                   max_pullback=cfg.get("limit_max_pullback", 0.05),
+                                   min_pullback=cfg.get("limit_min_pullback", 0.0015))
     sl = structure_sl(direction, entry, c["nearest_fvg"], c["structure"])
     if (direction > 0 and sl >= entry) or (direction < 0 and sl <= entry):
         return {"action": "skip", "reason": "invalid SL vs entry", "confluence": c}
@@ -87,9 +92,11 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
         return {"action": "skip", "reason": "qty<=0", "confluence": c}
     risk_usd = qty * abs(entry - sl)
     mode = cfg.get("mode", "scalp")
-    # SWING: jumlah TP berkala (2..4) dinamis dari keyakinan analisa; SCALP: single 100%
-    tps = tp_targets(direction, entry, sl, mode=mode, levels=swing_levels(c) if mode == "swing" else 1)
+    # SWING: jumlah TP berkala (1..3) dari Volatility State + ATR (deterministik); SCALP: single 100%
+    levels = swing_tp_count(c.get("vol_state"), c.get("atr_percentile")) if mode == "swing" else 1
+    tps = tp_targets(direction, entry, sl, mode=mode, levels=levels)
     return {"action": "open", "symbol": symbol, "direction": direction, "entry": entry, "sl": sl,
+            "order_type": order_type,
             "qty": qty, "leverage": lev, "margin_usd": round(notional / lev, 2) if lev else round(notional, 2),
             "risk_usd": round(risk_usd, 4), "risk_frac": round(risk_usd / equity, 5) if equity else 0.0,
             "tps": tps,
