@@ -9,7 +9,7 @@ tak tersentuh.
 from __future__ import annotations
 
 from src.smc.confluence import analyze_confluence, fib_preset
-from src.smc.risk import position_size, structure_sl, tp_targets
+from src.smc.risk import limit_entry, position_size, structure_sl, swing_levels, tp_targets
 
 # ── konfigurasi per-gaya (penyesuaian eksplisit user, lihat plan) ──
 GROUPS = {
@@ -18,14 +18,14 @@ GROUPS = {
         "lev_min": 15, "lev_max": 30, "stop_ref": (0.003, 0.02),   # SL rapat->lev_max, lebar->lev_min
         "risk_pct": 0.01, "margin_cap": 0.03, "max_open": 4,
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
-        "candle_limit": 220,
+        "candle_limit": 220, "pending_ttl_h": 6,     # limit order kadaluarsa 6 jam (main cepat)
     },
     "swing": {
         "tf": "4h", "mtf_minutes": [1440], "mode": "swing",
         "lev_min": 8, "lev_max": 15, "stop_ref": (0.01, 0.08),
         "risk_pct": 0.02, "margin_cap": 0.07, "max_open": 4,
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
-        "candle_limit": 220,
+        "candle_limit": 220, "pending_ttl_h": 48,     # limit order kadaluarsa 48 jam
     },
 }
 
@@ -48,20 +48,27 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     """Pure decision (tanpa network/side-effect). Return action dict — 'open' atau 'skip'."""
     c = analyze_confluence(candles, fvg_config=cfg["fvg_config"], fib_config=fib_preset(cfg["tf"]),
                            fr_score=fr_score, oi_score=oi_score)
-    if not c["full_strong"]:
-        return {"action": "skip", "reason": "no full_strong signal", "confluence": c}
+    # GERBANG: |full_score| >= min_abs_score (default 2 = metodologi sumber; agen bisa setel [1..4])
+    min_score = cfg.get("min_abs_score", 2)
+    if abs(c["full_score"]) < min_score:
+        return {"action": "skip", "reason": f"|score| {abs(c['full_score'])} < gate {min_score}", "confluence": c}
     direction = 1 if c["full_score"] > 0 else -1
-    # momentum/volatilitas/volume filter (SKIP kode-enforce, TAK diubah dari sumber)
-    if c.get("ranging"):
+    # filter SKIP (tiap toggle bisa dimatikan agen via config_store; default sesuai sumber)
+    if cfg.get("skip_ranging", True) and c.get("ranging"):
         return {"action": "skip", "reason": "vol_state=ranging (no trend)", "confluence": c}
-    if c.get("volume_ok") is False:
+    if cfg.get("skip_volume_anomaly", True) and c.get("volume_ok") is False:
         return {"action": "skip", "reason": "volume anomaly (below average)", "confluence": c}
-    if lsr_score != 0 and lsr_score != direction:
+    if cfg.get("lsr_contrarian", True) and lsr_score != 0 and lsr_score != direction:
         return {"action": "skip", "reason": f"lsr_score {lsr_score} against direction {direction}", "confluence": c}
-    # disiplin zona: long hanya discount, short hanya premium (TAK diubah)
-    if (direction > 0 and c["zone"] != "discount") or (direction < 0 and c["zone"] != "premium"):
+    # disiplin zona: long hanya discount, short hanya premium (bisa dimatikan agen: enforce_zone)
+    if cfg.get("enforce_zone", True) and (
+            (direction > 0 and c["zone"] != "discount") or (direction < 0 and c["zone"] != "premium")):
         return {"action": "skip", "reason": f"zone {c['zone']} blocks {direction}", "confluence": c}
-    entry = c["price"]
+    # LIMIT ORDER: entry = retest zona imbalance (bukan market di harga kini). Arena memasang
+    # order PENDING di harga ini & menunggu pullback mengisinya (lihat arena.check_pending).
+    entry = limit_entry(direction, c["price"], c["nearest_fvg"],
+                        max_pullback=cfg.get("limit_max_pullback", 0.05),
+                        min_pullback=cfg.get("limit_min_pullback", 0.0015))
     sl = structure_sl(direction, entry, c["nearest_fvg"], c["structure"])
     if (direction > 0 and sl >= entry) or (direction < 0 and sl <= entry):
         return {"action": "skip", "reason": "invalid SL vs entry", "confluence": c}
@@ -79,9 +86,12 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     if qty <= 0:
         return {"action": "skip", "reason": "qty<=0", "confluence": c}
     risk_usd = qty * abs(entry - sl)
+    mode = cfg.get("mode", "scalp")
+    # SWING: jumlah TP berkala (2..4) dinamis dari keyakinan analisa; SCALP: single 100%
+    tps = tp_targets(direction, entry, sl, mode=mode, levels=swing_levels(c) if mode == "swing" else 1)
     return {"action": "open", "symbol": symbol, "direction": direction, "entry": entry, "sl": sl,
             "qty": qty, "leverage": lev, "margin_usd": round(notional / lev, 2) if lev else round(notional, 2),
             "risk_usd": round(risk_usd, 4), "risk_frac": round(risk_usd / equity, 5) if equity else 0.0,
-            "tps": tp_targets(direction, entry, sl, mode=cfg.get("mode", "scalp")),
+            "tps": tps,
             "full_score": c["full_score"], "zone": c["zone"], "high_confluence": c["high_confluence"],
             "fr_score": c["fr_score"], "oi_score": c["oi_score"], "lsr_score": lsr_score}

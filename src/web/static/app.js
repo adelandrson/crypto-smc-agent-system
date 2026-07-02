@@ -28,16 +28,16 @@ function stopAgentPoll() { if (_agentTimer) { clearInterval(_agentTimer); _agent
 // ── util ──────────────────────────────────────────────
 const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const fmtUsd = n => n == null ? "—" : (Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(1) + "B" : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(0) + "M" : Math.abs(n) >= 1e3 ? (n / 1e3).toFixed(0) + "k" : n.toFixed(0));
+// Angka utama (significant figures): harga >=$1000 -> 5 sig-fig; <$1000 -> 4 sig-fig.
+// Contoh: BTC 60130, ETH 1630.5, SOL 77.67, UNI 3.055, SUI 0.7239.
 function fmtPrice(p) {
   if (p == null || isNaN(p)) return "—";
   const a = Math.abs(p);
   if (a === 0) return "0";
-  if (a >= 1000) return p.toFixed(1);
-  if (a >= 10) return p.toFixed(2);
-  if (a >= 1) return p.toFixed(3);
-  if (a >= 0.1) return p.toFixed(4);
-  if (a >= 0.01) return p.toFixed(5);
-  return p.toFixed(6);
+  const sig = a >= 1000 ? 5 : 4;
+  const d = sig - 1 - Math.floor(Math.log10(a));
+  if (d <= 0) { const f = Math.pow(10, d); return String(Math.round(p * f) / f); }
+  return p.toFixed(d);
 }
 function md(src) {
   const lines = (src || "").split("\n"); let html = "", inUl = false, inTbl = false;
@@ -265,6 +265,17 @@ function _posCard(p) {
     ${_tpLadder(p.tps, p.fills)}
   </div>`;
 }
+function _pendingCard(p) {
+  const dir = p.leg === "long" ? "LONG" : "SHORT";
+  return `<div class="pos-card pending">
+    <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${dir} · ${p.leverage}x</span></span>
+      <span class="pending-badge">◷ LIMIT menunggu</span></div>
+    <div class="ac-grid"><div><span>Limit</span><b>${fmtPrice(p.entry)}</b></div>
+      <div><span>Harga sinyal</span><b class="muted">${p.mark_price != null ? fmtPrice(p.mark_price) : "—"}</b></div>
+      <div><span>SL</span><b>${fmtPrice(p.sl)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
+    <div class="tp-labels" style="margin-top:6px"><span>Dipasang ${p.placed_ts ? new Date(p.placed_ts).toLocaleString() : ""}</span></div>
+  </div>`;
+}
 async function loadAgent(silent) {
   const out = document.getElementById("agentOut"), summ = document.getElementById("agentSummary");
   if (!silent) out.innerHTML = `<div class="loading"><div class="spinner"></div> memuat…</div>`;
@@ -279,8 +290,9 @@ async function loadAgent(silent) {
         <div class="ac-expectancy">Expectancy: <b>${s.expectancy_r != null ? (s.expectancy_r > 0 ? "+" : "") + s.expectancy_r + "R" : "belum cukup sampel"}</b></div>
       </div>`).join("")}</div>`;
     let html = "";
+    if (d.pending && d.pending.length) html += `<h3 class="ag-h">LIMIT order menunggu (${d.pending.length})</h3>` + d.pending.map(_pendingCard).join("");
     if (d.open && d.open.length) html += `<h3 class="ag-h">Posisi terbuka (${d.open.length})</h3>` + d.open.map(_posCard).join("");
-    else html += `<p class="muted">Tidak ada posisi terbuka.</p>`;
+    else if (!(d.pending && d.pending.length)) html += `<p class="muted">Tidak ada posisi terbuka atau limit order menunggu.</p>`;
     if (d.closed && d.closed.length) {
       const thead = `<tr><th>Koin</th><th>Gaya</th><th>Arah</th><th class="r">PnL</th><th class="r">R</th><th>Outcome</th><th>Ditutup</th></tr>`;
       const rowFn = r => `<tr><td><b>${esc(r.symbol)}</b></td><td class="muted">${esc(r.group)}</td>

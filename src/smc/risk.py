@@ -6,7 +6,44 @@ derived from risk% and SL distance — leverage never inflates risk per trade.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
+
+
+def fmt_price(p: Optional[float]) -> str:
+    """Harga dalam ANGKA UTAMA (significant figures): >=$1000 -> 5 sig-fig, <$1000 -> 4 sig-fig.
+    Contoh: 60130, 1630.5, 77.67, 3.055, 0.7239."""
+    if p is None:
+        return "-"
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return "-"
+    if math.isnan(p) or p == 0:
+        return "0" if p == 0 else "-"
+    a = abs(p)
+    sig = 5 if a >= 1000 else 4
+    d = sig - 1 - math.floor(math.log10(a))
+    if d <= 0:
+        return str(int(round(p, d)))
+    return f"{round(p, d):.{d}f}"
+
+
+def limit_entry(direction: int, price: float, nearest_fvg: Optional[dict],
+                max_pullback: float = 0.05, min_pullback: float = 0.0015) -> float:
+    """Harga LIMIT ORDER (retest zona imbalance) — bukan market di harga kini. SMC entry presisi:
+    Long = retest TOP FVG bullish di BAWAH harga; Short = retest BOTTOM FVG bearish di ATAS harga.
+    Fallback (tak ada FVG searah): pullback kecil `min_pullback` dari harga kini. Di-clamp
+    `max_pullback` supaya limit tak terlalu jauh (realistis terisi, bukan menggantung selamanya)."""
+    if price <= 0:
+        return price
+    if direction > 0:
+        zone = nearest_fvg.get("top") if nearest_fvg else None
+        cand = zone if (zone and 0 < zone < price) else price * (1 - min_pullback)
+        return max(cand, price * (1 - max_pullback))       # tak lebih jauh dari max_pullback
+    zone = nearest_fvg.get("bottom") if nearest_fvg else None
+    cand = zone if (zone and zone > price) else price * (1 + min_pullback)
+    return min(cand, price * (1 + max_pullback))
 
 
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:
@@ -46,32 +83,44 @@ def structure_sl(direction: int, entry: float, nearest_fvg: Optional[dict],
         return ref * (1 + buffer)
 
 
-def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp"):
-    """Staged take-profits matching the skill's exit structure.
+# Ladder TP berkala SWING per jumlah level (2..4), fraksi total = 100% (tanpa moonbag).
+_SWING_LADDERS = {
+    2: [("TP1", 2.0, 0.50, {"mode": "be"}),
+        ("TP2", 4.0, 0.50, {})],
+    3: [("TP1", 2.0, 0.40, {"mode": "be"}),
+        ("TP2", 3.5, 0.35, {"mode": "lock", "lock_label": "TP1"}),
+        ("TP3", 5.0, 0.25, {})],
+    4: [("TP1", 2.0, 0.30, {"mode": "be"}),
+        ("TP2", 3.5, 0.25, {"mode": "lock", "lock_label": "TP1"}),
+        ("TP3", 5.0, 0.25, {"mode": "trail", "value": 0.05}),
+        ("TP4", 7.0, 0.20, {})],
+}
 
-    mode='scalp' (Mode A4): 3 levels — 1.5R/2.5R/4R, sizes 50/30/20%, SL->BE after TP1.
-    mode='swing' (Mode B3): 5 levels + moonbag — 1.5R/2.5R/4R/6R + moonbag(trailing),
-        sizes 25/25/25/15/10%, SL evolution: BE -> TP1 -> trail 5% -> trail 8%.
 
-    Each TP carries `sl_after` metadata the broker applies on fill so SL evolves
-    exactly per the skill (B3 SL evolution) rather than only BE-after-TP1.
+def swing_levels(confluence: dict) -> int:
+    """Jumlah TP berkala SWING (2..4) dari 'probabilitas' analisa. Keyakinan tinggi -> lebih
+    banyak level (biarkan winner lari). Sinyal: |full_score|, high_confluence, confirmed."""
+    score = abs(confluence.get("full_score", confluence.get("analysis_score", 0)) or 0)
+    n = 2
+    if score >= 3 or confluence.get("high_confluence"):
+        n += 1
+    if score >= 4 or (confluence.get("high_confluence") and confluence.get("confirmed")):
+        n += 1
+    return max(2, min(4, n))
+
+
+def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp", levels: int = 3):
+    """Rencana take-profit.
+
+    mode='scalp' — MAIN CEPAT: SATU TP tutup 100% di 2R, tanpa TP berkala/SL-evolution.
+    mode='swing' — TP BERKALA dinamis 2..4 level (fixed, sum=100%) sesuai `levels` (dari
+        `swing_levels`); R 2R->7R; SL evolution BE->lock-TP1->trailing di level antara.
     """
     R = abs(entry - sl)
-    if mode == "swing":
-        plan = [
-            ("TP1", 1.5, 0.25, {"mode": "be"}),
-            ("TP2", 2.5, 0.25, {"mode": "lock", "lock_label": "TP1"}),
-            ("TP3", 4.0, 0.25, {"mode": "trail", "value": 0.05}),
-            ("TP4", 6.0, 0.15, {"mode": "trail", "value": 0.08}),
-            ("TP5", None, 0.10, {"mode": "trail", "value": 0.08}),  # moonbag: no fixed price
-        ]
-    else:  # scalp (A4)
-        plan = [
-            ("TP1", 1.5, 0.50, {"mode": "be"}),
-            ("TP2", 2.5, 0.30, {"mode": "trail", "value": 0.003}),
-            ("TP3", 4.0, 0.20, {"mode": "trail", "value": 0.003}),
-        ]
-    return [{"label": lbl,
-             "price": (None if mult is None else entry + direction * mult * R),
+    if mode == "scalp":
+        plan = [("TP1", 2.0, 1.00, {})]                      # 100% sekaligus (main cepat)
+    else:  # swing
+        plan = _SWING_LADDERS[levels if levels in _SWING_LADDERS else 3]
+    return [{"label": lbl, "price": entry + direction * mult * R,
              "frac": frac, "filled": False, "sl_after": sa}
             for lbl, mult, frac, sa in plan]

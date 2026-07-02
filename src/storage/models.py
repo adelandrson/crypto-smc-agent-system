@@ -70,9 +70,11 @@ class DryRunTrade(Base):
     group: Mapped[str] = mapped_column(String(8), index=True)           # scalp | swing
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     leg: Mapped[str] = mapped_column(String(8))                         # long | short
-    status: Mapped[str] = mapped_column(String(8), default="open", index=True)  # open | closed
-    entry_ts: Mapped[datetime] = mapped_column(UTCDateTime())
-    entry: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)  # pending | open | closed | canceled
+    placed_ts: Mapped[datetime | None] = mapped_column(UTCDateTime())   # saat LIMIT order dipasang (pending)
+    mark_price: Mapped[float | None] = mapped_column(Float)             # harga pasar saat sinyal (limit=entry di bawah/atas ini)
+    entry_ts: Mapped[datetime | None] = mapped_column(UTCDateTime())    # = placed_ts saat pending; ditimpa waktu fill saat terisi
+    entry: Mapped[float] = mapped_column(Float)                         # harga LIMIT (=harga fill saat terisi, maker)
     sl: Mapped[float] = mapped_column(Float)                            # mutable: BE -> lock-TP1 -> trail
     original_qty: Mapped[float] = mapped_column(Float)
     qty_remaining: Mapped[float] = mapped_column(Float)

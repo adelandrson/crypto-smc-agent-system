@@ -1,10 +1,10 @@
-"""Dry-run broker DB-backed — posisi dibuka LANGSUNG (market-fill+slippage) saat sinyal
-full_strong, sama seperti paper/broker.py sumber (metodologi ini TAK punya konsep limit-order
-pending seperti crypto-trader-agent-system — entry selalu di harga confluence TERKINI). TP
-bertahap + evolusi SL dipersist ke SQL (DryRunTrade+DryRunFill) alih-alih in-memory dataclass,
-supaya bisa ditampilkan web & bertahan lintas-restart — arsitektur operasional yang SAMA dengan
-crypto-trader-agent-system (step()/monitor()/reset()/summary()), decision logic BEDA (confluence
-FVG/SMC, bukan pattern-screening).
+"""Dry-run broker DB-backed — LIMIT ORDER: sinyal full_strong memasang order PENDING di harga
+retest zona imbalance (risk.limit_entry), lalu check_pending() mengisinya saat harga menyentuh
+limit (long: low<=limit / short: high>=limit) atau membatalkannya (TTL habis / harga kabur).
+Ini BEDA dari paper/broker.py sumber yg market-fill seketika — sesuai instruksi user "tentukan
+harga limit order, bukan bermain market order". Setelah terisi (open), TP bertahap + evolusi SL
+dipersist ke SQL (DryRunTrade+DryRunFill). Siklus operasional: check_pending()/check_open()/
+screen_place() via step()/monitor()/reset()/summary(). Decision logic = confluence FVG/SMC.
 """
 from __future__ import annotations
 
@@ -13,11 +13,13 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from src.smc.binance_adapter import BinanceAdapter
+from src.smc.config_store import effective_groups
 from src.smc.decide import GROUPS, decide
 from src.smc.oi_tracker import OITracker
+from src.smc.risk import fmt_price
 from src.smc.sentiment import aggregate_sentiment
 from src.smc.session import session_ok
 from src.storage.db import SessionLocal, init_db
@@ -54,30 +56,74 @@ def open_count(group: str, s) -> int:
         DryRunTrade.agent == _agent(group), DryRunTrade.status == "open")) or 0
 
 
+def active_count(group: str, s) -> int:
+    """Slot terpakai = pending (limit menunggu isi) + open. Cap max_open dihitung dari ini,
+    supaya limit order yg belum terisi tetap memesan slot (tak over-place)."""
+    return s.scalar(select(func.count()).select_from(DryRunTrade).where(
+        DryRunTrade.agent == _agent(group), DryRunTrade.status.in_(("pending", "open")))) or 0
+
+
+# Urutan tier-list S->A->B->C (koin tier atas dipindai/diisi lebih dulu), lalu volume 24h.
+TIER_ORDER = case((Token.tier == "S", 0), (Token.tier == "A", 1),
+                  (Token.tier == "B", 2), (Token.tier == "C", 3), else_=4)
+
+
 def universe_symbols(s, limit: int = 200) -> list[str]:
     rows = s.scalars(select(Token.symbol).where(Token.in_watchlist.is_(True))
-                     .order_by(Token.market_cap.desc()).limit(limit)).all()
+                     .order_by(TIER_ORDER, Token.volume_24h.desc().nullslast()).limit(limit)).all()
     return list(rows)
 
 
-# ── buka posisi ──────────────────────────────────────────────────────────────
-def open_trade(s, group: str, symbol: str, d: dict) -> DryRunTrade:
-    """d = decide() 'open' action dict. Fill disimulasikan dgn slippage+fee (sama persis
-    formula paper/broker.py PaperBroker.open)."""
+# ── pasang LIMIT order (pending) → fill on pullback → cancel ─────────────────
+CANCEL_RUN = 0.02      # harga kabur >2% searah dari limit tanpa pullback -> batal (jangan chase)
+
+
+def place_pending(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
+    """Pasang LIMIT order PENDING di harga d['entry'] (retest zona imbalance, dari
+    risk.limit_entry). BELUM terisi, BELUM kena fee — menunggu harga menyentuh limit
+    (lihat check_pending). Slot posisi (max_open) sudah terpakai sejak pending."""
     direction = d["direction"]
-    fill = d["entry"] * (1 + direction * SLIPPAGE)
-    fee = _fee(fill, d["qty"])
+    now = _now()
+    # entry_ts di-set = waktu pasang (placeholder) — bukan None — supaya kompatibel dgn tabel lama
+    # yg kolom entry_ts-nya NOT NULL (SQLite tak bisa relax constraint via ALTER ADD COLUMN).
+    # fill_pending menimpanya dgn waktu fill SEBENARNYA saat terisi. UI pending pakai placed_ts.
     tr = DryRunTrade(
         agent=_agent(group), group=group, symbol=symbol, leg=("long" if direction > 0 else "short"),
-        status="open", entry_ts=_now(), entry=fill, sl=d["sl"],
+        status="pending", placed_ts=now, mark_price=mark, entry_ts=now, entry=d["entry"], sl=d["sl"],
         original_qty=d["qty"], qty_remaining=d["qty"], leverage=d["leverage"],
         risk_frac=d["risk_frac"], risk_usd=d["risk_usd"], margin_usd=d["margin_usd"],
         tps=json.dumps(d["tps"]), full_score=d["full_score"], zone=d["zone"],
         high_confluence=d["high_confluence"], fr_score=d.get("fr_score"),
         oi_score=d.get("oi_score"), lsr_score=d.get("lsr_score"),
-        realized_pnl_usd=-fee,
+        realized_pnl_usd=0.0,
     )
     s.add(tr)
+    s.commit()
+    return tr
+
+
+def fill_pending(s, tr: DryRunTrade) -> str:
+    """Limit terisi: pending -> open. Fill TEPAT di harga limit (maker, TANPA slippage —
+    justru keunggulan limit vs market), potong fee entry saat itu."""
+    fee = _fee(tr.entry, tr.qty_remaining)
+    tr.status = "open"
+    tr.entry_ts = _now()
+    tr.realized_pnl_usd = (tr.realized_pnl_usd or 0.0) - fee
+    return f"{tr.symbol} LIMIT {tr.leg} terisi @ {fmt_price(tr.entry)}"
+
+
+def cancel_pending(s, tr: DryRunTrade, reason: str) -> str:
+    tr.status = "canceled"
+    tr.outcome = "canceled"
+    tr.closed_at = _now()
+    return f"{tr.symbol} LIMIT {tr.leg} batal — {reason}"
+
+
+def open_trade(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
+    """Konvenien: pasang pending LALU langsung isi (fill seketika di harga limit). Dipakai
+    saat entry ingin dieksekusi tanpa menunggu (mis. test, atau harga sudah di zona)."""
+    tr = place_pending(s, group, symbol, d, mark=mark)
+    fill_pending(s, tr)
     s.commit()
     return tr
 
@@ -134,7 +180,7 @@ def manage_position(s, tr: DryRunTrade, high: float, low: float, close: float) -
         changed = True
         s.add(DryRunFill(trade_id=tr.id, label=tp["label"], price=round(fill_px, 8),
                           qty=round(q, 10), pnl_usd=round(pnl, 4), ts=_now()))
-        events.append(f"{tr.symbol} {tp['label']} hit @ {fill_px:.6g} ({pnl:+.2f}$)")
+        events.append(f"{tr.symbol} {tp['label']} hit @ {fmt_price(fill_px)} ({pnl:+.2f}$)")
         _apply_sl_after(tr, tp, close, direction)   # bisa set tr.trail (assignment, latest wins)
 
     # 2b. fase moonbag — begitu SEMUA TP berharga terisi, terapkan trail moonbag SENDIRI. Moonbag
@@ -164,7 +210,7 @@ def manage_position(s, tr: DryRunTrade, high: float, low: float, close: float) -
             tr.realized_pnl_usd = (tr.realized_pnl_usd or 0.0) + pnl
             s.add(DryRunFill(trade_id=tr.id, label=reason, price=round(fill_px, 8),
                               qty=round(tr.qty_remaining, 10), pnl_usd=round(pnl, 4), ts=_now()))
-            events.append(f"{tr.symbol} {reason} hit @ {fill_px:.6g} ({pnl:+.2f}$)")
+            events.append(f"{tr.symbol} {reason} hit @ {fmt_price(fill_px)} ({pnl:+.2f}$)")
             tr.qty_remaining = 0.0
             changed = True
 
@@ -177,6 +223,49 @@ def manage_position(s, tr: DryRunTrade, high: float, low: float, close: float) -
         tr.r_multiple = round(tr.realized_pnl_usd / tr.risk_usd, 3) if tr.risk_usd else None
     if changed:
         tr.tps = json.dumps(tps)
+    return events
+
+
+def check_pending(cli=None) -> list[str]:
+    """Untuk tiap LIMIT order PENDING: fetch bar terbaru, ISI bila harga menyentuh limit
+    (long: low<=limit, short: high>=limit), BATALKAN bila TTL habis atau harga kabur searah
+    >CANCEL_RUN tanpa pullback (jangan chase). Commit per-order (hindari lock spt check_open)."""
+    cli = cli or BinanceAdapter()
+    events: list[str] = []
+    with SessionLocal() as s:
+        ids = [tid for tid, in s.execute(
+            select(DryRunTrade.id).where(DryRunTrade.status == "pending")).all()]
+    for tid in ids:
+        try:
+            with SessionLocal() as s:
+                tr = s.get(DryRunTrade, tid)
+                if not tr or tr.status != "pending":
+                    continue
+                cfg = effective_groups().get(tr.group, {})
+                mkt = cfg.get("data_market_type", "perp")
+                try:
+                    bars = cli.fetch_ohlcv(f"{tr.symbol}/USDT", cfg.get("tf", "5m"), limit=2, market_type=mkt)
+                except Exception as e:  # noqa: BLE001
+                    events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
+                    continue
+                if not bars:
+                    continue
+                direction = 1 if tr.leg == "long" else -1
+                high, low, close = bars[-1][2], bars[-1][3], bars[-1][4]
+                touched = (direction > 0 and low <= tr.entry) or (direction < 0 and high >= tr.entry)
+                if touched:
+                    events.append(fill_pending(s, tr)); s.commit(); continue
+                ttl_h = cfg.get("pending_ttl_h", 24)
+                run = cfg.get("cancel_run", CANCEL_RUN)
+                age_h = (_now() - tr.placed_ts).total_seconds() / 3600.0 if tr.placed_ts else 0.0
+                ran = (direction > 0 and close > tr.entry * (1 + run)) or \
+                      (direction < 0 and close < tr.entry * (1 - run))
+                if age_h >= ttl_h:
+                    events.append(cancel_pending(s, tr, f"TTL {ttl_h}h lewat")); s.commit()
+                elif ran:
+                    events.append(cancel_pending(s, tr, f"harga kabur >{run*100:.1f}%")); s.commit()
+        except Exception as e:  # noqa: BLE001
+            events.append(f"pending {tid}: error {type(e).__name__}")
     return events
 
 
@@ -197,8 +286,10 @@ def check_open(cli=None) -> list[str]:
                 tr = s.get(DryRunTrade, tid)
                 if not tr or tr.status != "open":
                     continue
+                _cfg = effective_groups().get(tr.group, GROUPS.get(tr.group, {}))
                 try:
-                    bars_fetched = cli.fetch_ohlcv(f"{tr.symbol}/USDT", GROUPS[tr.group]["tf"], limit=2, market_type="perp")
+                    bars_fetched = cli.fetch_ohlcv(f"{tr.symbol}/USDT", _cfg.get("tf", "5m"),
+                                                   limit=2, market_type=_cfg.get("data_market_type", "perp"))
                 except Exception as e:  # noqa: BLE001
                     events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
                     continue
@@ -246,13 +337,14 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     cli = cli or BinanceAdapter()
     init_db()
     oi_tracker = OITracker()
-    cfg = GROUPS[group]
+    cfg = effective_groups()[group]        # knob metodologi/leverage/data yg bisa disetel agen
+    mkt = cfg.get("data_market_type", "perp")
     placed = 0
     with SessionLocal() as s:
         syms = symbols or universe_symbols(s)
     for sym in syms:
         try:
-            candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type="perp")
+            candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type=mkt)
             sent = aggregate_sentiment([cli], f"{sym}/USDT")
         except Exception:  # noqa: BLE001
             continue
@@ -263,7 +355,8 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             continue
         with SessionLocal() as s:
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
-                DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym, DryRunTrade.status == "open"))
+                DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym,
+                DryRunTrade.status.in_(("pending", "open"))))   # skip bila sudah ada pending/open utk simbol ini
             if has_pos:
                 s.commit()
                 continue
@@ -271,21 +364,25 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), candles[-1][4])
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
             _snapshot(s, group, sym, d)
-            if d["action"] == "open" and open_count(group, s) < cfg["max_open"]:
-                open_trade(s, group, sym, d)   # commit sendiri (lihat open_trade)
+            # slot dihitung dari active (pending+open); pasang LIMIT order PENDING, bukan market
+            if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:
+                place_pending(s, group, sym, d, mark=candles[-1][4])   # commit sendiri
                 placed += 1
             s.commit()
     return placed
 
 
 def step(symbols: list[str] | None = None) -> dict:
-    """Siklus cron: (1) kelola posisi terbuka kedua gaya, (2) scan sinyal baru kedua gaya."""
+    """Siklus cron: (1) isi/batalkan LIMIT order pending, (2) kelola posisi terbuka, (3) scan
+    sinyal baru → pasang limit order baru. Urutan penting: pending dulu (mungkin jadi open),
+    lalu kelola open, lalu scan (slot dihitung setelah pending diproses)."""
     cli = BinanceAdapter()
+    pending_events = check_pending(cli)
     closed_events = check_open(cli)
     placed = {g: screen_place(cli, group=g, symbols=symbols) for g in GROUPS}
-    print(f"[smc-arena {_now():%F %H:%M}] kelola: {len(closed_events)} event · pasang: "
-          f"{'+'.join(f'{g}={n}' for g, n in placed.items())}")
-    return {"closed_events": closed_events, "placed": placed}
+    print(f"[smc-arena {_now():%F %H:%M}] pending: {len(pending_events)} · kelola: "
+          f"{len(closed_events)} event · pasang: {'+'.join(f'{g}={n}' for g, n in placed.items())}")
+    return {"pending_events": pending_events, "closed_events": closed_events, "placed": placed}
 
 
 def monitor(interval: int = 20):

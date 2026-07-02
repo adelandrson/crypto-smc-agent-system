@@ -7,6 +7,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.smc import decide as decide_mod
 from src.smc.decide import GROUPS, _choose_leverage, decide
+from src.smc.risk import limit_entry
+
+
+def test_limit_entry_retest_zone():
+    """Entry = harga LIMIT ORDER di retest zona imbalance (bukan market di harga kini)."""
+    assert limit_entry(1, 100.0, {"top": 99.0, "bottom": 96.0}) == 99.0    # long: TOP FVG di bawah
+    assert limit_entry(-1, 100.0, {"top": 105.0, "bottom": 102.0}) == 102.0  # short: BOTTOM FVG di atas
+    assert limit_entry(1, 100.0, None) == 100.0 * (1 - 0.0015)             # tanpa FVG -> pullback kecil
+    assert limit_entry(1, 100.0, {"top": 80.0}) == 100.0 * (1 - 0.05)      # zona jauh -> clamp max_pullback
+
+
+def test_decide_uses_limit_entry_below_price_for_long(monkeypatch):
+    """decide() long menaruh entry di TOP FVG (96) di bawah harga kini (100), bukan di 100."""
+    monkeypatch.setattr(decide_mod, "analyze_confluence",
+                        lambda *a, **k: _c(full_score=3, zone="discount", price=100.0,
+                                           nearest_fvg={"bottom": 95.0, "top": 96.0}))
+    d = decide("BTC", [], 1, 1, 1000.0, GROUPS["scalp"], lsr_score=1)
+    assert d["action"] == "open" and d["entry"] == 96.0 and d["entry"] < 100.0
 
 
 def _c(**over):
@@ -33,10 +51,24 @@ def test_leverage_range_scalp_and_swing():
             assert cfg["lev_min"] <= lev <= cfg["lev_max"]
 
 
-def test_skip_when_not_full_strong(monkeypatch):
-    _patch(monkeypatch, _c(full_strong=False))
+def test_skip_when_below_score_gate(monkeypatch):
+    _patch(monkeypatch, _c(full_score=1))                    # |1| < gerbang default 2 -> skip
     d = decide("BTC", [], 0, 0, 1000.0, GROUPS["scalp"])
-    assert d["action"] == "skip" and "full_strong" in d["reason"]
+    assert d["action"] == "skip" and "gate" in d["reason"]
+
+
+def test_config_gate_min_abs_score(monkeypatch):
+    """Agen menaikkan gerbang ke 3 -> sinyal score-2 di-skip; turun ke 2 -> lolos."""
+    _patch(monkeypatch, _c(full_score=2, zone="discount"))
+    assert decide("BTC", [], 1, 1, 1000.0, dict(GROUPS["scalp"], min_abs_score=3), lsr_score=1)["action"] == "skip"
+    assert decide("BTC", [], 1, 1, 1000.0, dict(GROUPS["scalp"], min_abs_score=2), lsr_score=1)["action"] == "open"
+
+
+def test_config_enforce_zone_toggle(monkeypatch):
+    """Long di premium normal-nya di-skip; enforce_zone=False -> lolos (wewenang agen)."""
+    _patch(monkeypatch, _c(full_score=3, zone="premium"))
+    assert decide("BTC", [], 1, 1, 1000.0, dict(GROUPS["scalp"], enforce_zone=True), lsr_score=1)["action"] == "skip"
+    assert decide("BTC", [], 1, 1, 1000.0, dict(GROUPS["scalp"], enforce_zone=False), lsr_score=1)["action"] == "open"
 
 
 def test_skip_when_ranging(monkeypatch):
@@ -77,23 +109,34 @@ def test_open_long_sizing_leverage_margin(monkeypatch):
     assert abs(d["risk_frac"] - cfg["risk_pct"]) < 0.003
     # margin tak pernah melebihi margin_cap x equity (+ toleransi rounding)
     assert d["margin_usd"] <= cfg["margin_cap"] * equity + 0.5
-    # TP bertahap: 3 level utk scalp, total frac = 1.0
-    assert len(d["tps"]) == 3
-    assert abs(sum(t["frac"] for t in d["tps"]) - 1.0) < 1e-9
+    # SCALP = SINGLE TP 100% (main cepat), tanpa TP berkala
+    assert len(d["tps"]) == 1
+    assert d["tps"][0]["frac"] == 1.0
     assert d["tps"][0]["price"] > d["entry"]        # TP long di atas entry
 
 
-def test_open_short_zone_premium(monkeypatch):
-    _patch(monkeypatch, _c(full_score=-3, zone="premium", price=100.0,
+def test_open_short_zone_premium_swing_dynamic_tp(monkeypatch):
+    # full_score -3 -> swing_levels = 3 TP berkala (fixed, sum=100%, tanpa moonbag)
+    _patch(monkeypatch, _c(full_score=-3, zone="premium", price=100.0, high_confluence=False,
                             nearest_fvg={"bottom": 104.0, "top": 106.0},
                             structure={"last_swing_low": 90.0, "last_swing_high": 108.0}))
     d = decide("ETH", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)
-    assert d["action"] == "open"
-    assert d["direction"] == -1
+    assert d["action"] == "open" and d["direction"] == -1
     assert d["sl"] > d["entry"]          # short SL di atas entry
     assert d["tps"][0]["price"] < d["entry"]
-    assert len(d["tps"]) == 5             # swing = 5 level + moonbag
-    assert d["tps"][-1]["price"] is None  # moonbag: tanpa target fixed
+    assert len(d["tps"]) == 3             # score 3 -> 3 level
+    assert all(t["price"] is not None for t in d["tps"])   # tak ada moonbag
+    assert abs(sum(t["frac"] for t in d["tps"]) - 1.0) < 1e-9
+
+
+def test_swing_tp_count_scales_with_conviction(monkeypatch):
+    """Keyakinan lebih tinggi -> lebih banyak TP berkala (2..4)."""
+    base = dict(zone="premium", price=100.0, nearest_fvg={"bottom": 104.0, "top": 106.0},
+                structure={"last_swing_low": 90.0, "last_swing_high": 108.0})
+    _patch(monkeypatch, _c(full_score=-2, high_confluence=False, **base))
+    assert len(decide("E", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)["tps"]) == 2
+    _patch(monkeypatch, _c(full_score=-4, high_confluence=True, confirmed=True, **base))
+    assert len(decide("E", [], -1, -1, 1000.0, GROUPS["swing"], lsr_score=-1)["tps"]) == 4
 
 
 def test_margin_cap_shrinks_notional_not_risk_target(monkeypatch):

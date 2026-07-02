@@ -30,10 +30,12 @@ Momentum/Volatilitas (RSI+ADX+volume z-score)    → filter SKIP (ranging/volume
                     ↓
      CONFLUENCE SCORE (−4..+4) = FVG + Fib + OI + FR
                     ↓
-     |score| ≥ 2 & disiplin zona & lolos semua filter → TRADE (dry-run)
+     |score| ≥ gerbang (default 2) & disiplin zona & lolos semua filter → TRADE (dry-run)
                     ↓
-     SL berbasis struktur (bukan % tetap) · TP bertahap (scalp 3-level / swing 5-level+moonbag)
-     · evolusi SL (BE→lock-TP1→trailing) · sizing dari risk% (bukan leverage)
+     ENTRY = LIMIT ORDER di retest zona imbalance (pending → fill saat pullback / batal bila
+     TTL habis atau harga kabur) · SL berbasis struktur (bukan % tetap) · TP: SCALP 1 TP tutup
+     100% di 2R (main cepat) / SWING 2–4 TP berkala DINAMIS by keyakinan (BE→lock-TP1→trailing)
+     · sizing dari risk% (bukan leverage) · harga ditulis 5/4 angka utama
 ```
 
 ## Penyesuaian eksplisit (satu-satunya yang berbeda dari metodologi sumber)
@@ -85,8 +87,19 @@ cp .env.example .env   # isi CMC_API_KEY minimal
 
 ```bash
 python3 -m pytest src/engines/tests_fvg src/engines/tests_sfib src/engines/tests_ind tests/ -q
-# 93 test hijau: 29 FVG + 20 swing-fib + 16 indicators + 6 universe + 9 decide + 8 arena + 5 telegram
+# 109 test hijau: 29 FVG + 20 swing-fib + 16 indicators + universe/decide/arena/telegram/config-store/db
 ```
+
+## Wewenang agen atas konfigurasi
+
+Agen (Orin) punya **wewenang penuh atas parameter web** via chat — skill `config_get` / `config_set`
+/ `config_reset` (mis. *"naikkan gerbang confluence ke 3"*, *"matikan disiplin zona untuk swing"*,
+*"ubah timeframe scalp ke 15m"*, *"leverage swing maksimum 12x"*). Yang bisa disetel: gerbang
+`min_abs_score`, on/off tiap filter SKIP & disiplin zona, leverage/risk/margin/max_open/timeframe/
+pending-TTL per gaya, sumber-data (perp/spot), perilaku limit-order. **Divalidasi ketat & di-clamp
+ke rentang aman** — otoritas PARAMETER (`src/smc/config_store.py`), bukan eksekusi kode arbitrer
+(batas keamanan: agen menyerap konten eksternal → exec kode mentah = RCE). Perubahan berlaku ke
+scan berikutnya, lintas-proses (web ↔ monitor).
 
 ## Telegram (opsional)
 

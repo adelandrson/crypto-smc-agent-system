@@ -281,6 +281,37 @@ def rnd_universe_refresh():
     return _run_capture(universe.build)
 
 
+def config_get():
+    """LIHAT konfigurasi metodologi EFEKTIF (gerbang confluence min_abs_score, filter SKIP,
+    disiplin zona, leverage/risk/margin/max_open per gaya, timeframe & sumber-data, perilaku
+    limit-order) + daftar param yang boleh diubah beserta rentang aman-nya. Baca-saja."""
+    from src.smc import config_store
+    return config_store.snapshot()
+
+
+def config_set(key: str, value: str, group: str = ""):
+    """UBAH 1 parameter metodologi/logic/sumber-data (wewenang penuh agen atas web). key=nama
+    param; value=nilai baru; group='scalp'/'swing' utk param per-gaya (lev_min/lev_max/risk_pct/
+    margin_cap/max_open/pending_ttl_h/tf/candle_limit), kosong utk param global (min_abs_score/
+    enforce_zone/skip_ranging/skip_volume_anomaly/lsr_contrarian/limit_max_pullback/
+    limit_min_pullback/cancel_run/data_market_type). Divalidasi & di-clamp ke rentang aman;
+    berlaku ke scan berikutnya. Jalankan config_get dulu utk lihat param & rentang."""
+    from src.smc import config_store
+    try:
+        v = config_store.set_param(key, value, group=group or None)
+        return {"ok": True, "key": key, "group": group or "global", "nilai_efektif": v}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:250]}
+
+
+def config_reset(key: str = "", group: str = ""):
+    """RESET parameter ke default metodologi sumber. key kosong = reset SEMUA override; isi key
+    (+group opsional) utk reset satu param saja."""
+    from src.smc import config_store
+    config_store.reset(key=key or None, group=group or None)
+    return {"ok": True, "reset": key or "SEMUA override"}
+
+
 # registry: nama -> (impl, schema-parameter, deskripsi)
 _TF = {"type": "string", "enum": ["5m", "15m", "1h", "4h", "1d"]}
 _SYM = {"symbol": {"type": "string", "description": "simbol koin, mis. BTC / ETH / SOL"}}
@@ -305,6 +336,12 @@ _SKILLS = {
     "list_dir": (list_dir, _p({"path": {"type": "string"}}, []), list_dir.__doc__.strip()),
     "rnd_step": (rnd_step, _p({"symbols": {"type": "string"}}, []), rnd_step.__doc__.strip()),
     "rnd_universe_refresh": (rnd_universe_refresh, _p({}, []), rnd_universe_refresh.__doc__.strip()),
+    "config_get": (config_get, _p({}, []), config_get.__doc__.strip()),
+    "config_set": (config_set, _p({"key": {"type": "string"}, "value": {"type": "string"},
+                                   "group": {"type": "string", "enum": ["scalp", "swing", ""]}},
+                                  ["key", "value"]), config_set.__doc__.strip()),
+    "config_reset": (config_reset, _p({"key": {"type": "string"}, "group": {"type": "string"}}, []),
+                     config_reset.__doc__.strip()),
 }
 
 

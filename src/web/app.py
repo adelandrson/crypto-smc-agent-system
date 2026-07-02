@@ -34,9 +34,10 @@ def doctor():
 # ── Universe / tier-list ─────────────────────────────────────────────────────
 @app.get("/api/universe")
 def universe_api():
+    from src.smc.arena import TIER_ORDER
     with SessionLocal() as s:
         rows = s.scalars(select(Token).where(Token.in_watchlist.is_(True))
-                         .order_by(Token.market_cap.desc())).all()
+                         .order_by(TIER_ORDER, Token.volume_24h.desc().nullslast())).all()
         return {"tokens": [{"symbol": r.symbol, "name": r.name, "market_cap": r.market_cap,
                             "volume_24h": r.volume_24h, "tier": r.tier, "cmc_rank": r.cmc_rank}
                            for r in rows]}
@@ -93,6 +94,8 @@ def analyze_api(symbol: str):
 def agent_api():
     from src.smc import arena
     with SessionLocal() as s:
+        pending_rows = s.scalars(select(DryRunTrade).where(DryRunTrade.status == "pending")
+                                 .order_by(desc(DryRunTrade.placed_ts))).all()
         open_rows = s.scalars(select(DryRunTrade).where(DryRunTrade.status == "open")
                               .order_by(desc(DryRunTrade.entry_ts))).all()
         closed_rows = s.scalars(select(DryRunTrade).where(DryRunTrade.status == "closed")
@@ -106,17 +109,19 @@ def agent_api():
 
         def _row(r):
             return {"id": r.id, "symbol": r.symbol, "group": r.group, "leg": r.leg,
-                    "entry": r.entry, "sl": r.sl, "leverage": r.leverage,
+                    "entry": r.entry, "sl": r.sl, "leverage": r.leverage, "mark_price": r.mark_price,
                     "original_qty": r.original_qty, "qty_remaining": r.qty_remaining,
                     "risk_usd": r.risk_usd, "margin_usd": r.margin_usd,
                     "full_score": r.full_score, "zone": r.zone, "high_confluence": r.high_confluence,
                     "realized_pnl_usd": round(r.realized_pnl_usd or 0, 4), "outcome": r.outcome,
                     "r_multiple": r.r_multiple, "status": r.status,
+                    "placed_ts": r.placed_ts.isoformat() if r.placed_ts else None,
                     "entry_ts": r.entry_ts.isoformat() if r.entry_ts else None,
                     "closed_at": r.closed_at.isoformat() if r.closed_at else None,
                     "tps": json.loads(r.tps), "fills": _fills(r.id)}
 
-        return {"available": True, "open": [_row(r) for r in open_rows],
+        return {"available": True, "pending": [_row(r) for r in pending_rows],
+                "open": [_row(r) for r in open_rows],
                 "closed": [_row(r) for r in closed_rows], "summary": arena.summary()}
 
 
@@ -145,10 +150,13 @@ _CHAT_SYS = (
     "RINGKAS SISTEM (acuan jawabanmu): sistem PEMBANDING (crypto-smc-agent-system) yang menguji "
     "metodologi Smart Money Concepts (SMC) — FVG (Fair Value Gap) + Fibonacci/Order Block/struktur "
     "BOS-CHoCH, dikombinasi Open Interest+Funding Rate+Long/Short Ratio jadi confluence score -4..+4. "
-    "Trade HANYA jika |full_score|>=2 & lolos SEMUA filter (zona premium/discount, ranging, volume "
-    "anomaly, LSR kontrarian). SL berbasis struktur (bukan persentase tetap), TP bertahap (scalp "
-    "3-level/swing 5-level+moonbag), leverage scalp 15-30x/swing 8-15x, max 4 posisi/gaya, risk 1%/2% "
-    "dari ekuitas. DRY-RUN/PAPER SAJA — tidak ada eksekusi nyata, tidak ada dana nyata, SELAMANYA "
+    "Trade HANYA jika |full_score|>=gerbang (default 2) & lolos SEMUA filter (zona premium/discount, "
+    "ranging, volume anomaly, LSR kontrarian). ENTRY via LIMIT ORDER di retest zona imbalance (bukan "
+    "market di harga kini) — order pending menunggu pullback mengisinya, batal bila TTL habis/harga "
+    "kabur. SL berbasis struktur (bukan persentase tetap). TP: SCALP satu TP tutup 100% (main cepat) "
+    "di 2R; SWING 2-4 TP berkala DINAMIS sesuai keyakinan analisa (BE->lock-TP1->trailing). Leverage "
+    "scalp 15-30x/swing 8-15x, max 4 posisi/gaya, risk 1%/2% dari ekuitas. Harga ditulis 5/4 angka "
+    "utama. DRY-RUN/PAPER SAJA — tidak ada eksekusi nyata, tidak ada dana nyata, SELAMANYA "
     "(bukan cuma testnet). Metodologi sumber (AUDIT.md eksternal) terbukti hit-rate <50% WAJAR — "
     "ekspektasi positif datang dari R:R (TP bertahap), BUKAN dari frekuensi menang. JANGAN PERNAH "
     "bingkai win-rate rendah sbg 'sistem gagal' tanpa mengecek expectancy-R dulu.\n"
@@ -160,11 +168,19 @@ _CHAT_SYS = (
     "lengkap, status dry-run, tier-list universe, db_query). KALAU user tanya soal koin/data/sistem "
     "yang butuh angka real — PANGGIL skill-nya, lalu kasih jawaban LENGKAP di respons ini. Jangan "
     "cuma janji 'saya analisa dulu' lalu berhenti. Angka HARUS dari skill, jangan mengarang.\n"
-    "BATAS (WAJIB & JUJUR): kamu TIDAK BISA menulis/ubah kode/parameter/logic dari chat — kalau user "
-    "minta itu, posisikan sbg USULAN buat developer manusia (apa/kenapa/di mana/risiko), tegaskan "
-    "'ini usulan, saya tidak bisa menerapkannya sendiri'. Kamu TIDAK BISA reset/hapus data dry-run "
-    "dari chat — itu hanya lewat UI web dengan konfirmasi manusia. Jangan pernah mengaku 'sudah "
-    "diterapkan' padahal cuma mengusulkan."
+    "WEWENANG PENUH ATAS WEB (diberikan user): kamu BISA mengubah logic/metodologi/sumber-data "
+    "lewat config_get (lihat param & rentang), config_set (ubah 1 param), config_reset (kembalikan "
+    "default). Yang bisa disetel: gerbang min_abs_score, on/off tiap filter SKIP & disiplin zona, "
+    "leverage/risk/margin/max_open/timeframe(tf)/pending_ttl per gaya, sumber-data (perp/spot), "
+    "perilaku limit-order (pullback/cancel_run). Perubahan berlaku ke scan berikutnya & langsung "
+    "nyata — JADI hati-hati, jelaskan dampak & konfirmasi maksud user sebelum ubah yang berisiko "
+    "(mis. matikan disiplin zona / turunkan gerbang = lebih banyak sinyal berkualitas rendah). "
+    "Selalu laporkan nilai efektif setelah set (bisa di-clamp). Kalau user cuma tanya, jangan ubah.\n"
+    "BATAS (tetap, demi keamanan): otoritasmu di level PARAMETER (via config_*), BUKAN eksekusi "
+    "kode arbitrer — kamu tak menulis/menjalankan kode mentah dari chat (kamu menyerap konten "
+    "eksternal yang bisa disusupi; exec kode = RCE). Perubahan STRUKTURAL di luar param yang ada "
+    "tetap USULAN buat developer. Kamu TIDAK reset/hapus data dry-run dari chat — itu lewat UI web "
+    "dgn konfirmasi manusia. Jangan mengaku 'sudah diterapkan' untuk hal yang cuma kamu usulkan."
 )
 
 

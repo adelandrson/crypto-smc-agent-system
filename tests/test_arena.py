@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from src.smc import arena
 from src.smc.decide import GROUPS
 from src.smc.risk import tp_targets
-from src.storage.models import Base, DryRunFill, DryRunTrade
+from src.storage.models import Base, DryRunFill, DryRunTrade, Token
 
 
 def _mk_session():
@@ -32,6 +32,29 @@ LONG_DECIDE = {
 }
 
 
+class _FakeCli:
+    """cli palsu utk check_pending: fetch_ohlcv selalu balikkan bar yg sama."""
+    def __init__(self, bar):
+        self._bar = bar
+
+    def fetch_ohlcv(self, symbol, tf, limit=2, market_type="perp"):
+        return [self._bar, self._bar]
+
+
+def test_universe_symbols_ordered_by_tier_then_volume():
+    """Universe dipindai urut tier S->A->B->C, lalu volume 24h desc di dalam tier."""
+    Mk = _mk_session()
+    with Mk() as s:
+        s.add_all([
+            Token(token_id=1, symbol="CCC", in_watchlist=True, tier="C", volume_24h=9e9),
+            Token(token_id=2, symbol="SSS", in_watchlist=True, tier="S", volume_24h=10.0),
+            Token(token_id=3, symbol="AAA", in_watchlist=True, tier="A", volume_24h=50.0),
+            Token(token_id=4, symbol="SS2", in_watchlist=True, tier="S", volume_24h=99.0),
+        ])
+        s.commit()
+        assert arena.universe_symbols(s) == ["SS2", "SSS", "AAA", "CCC"]
+
+
 def test_open_trade_persists_fields_and_deducts_fee():
     Mk = _mk_session()
     with Mk() as s:
@@ -40,46 +63,66 @@ def test_open_trade_persists_fields_and_deducts_fee():
         assert tr.status == "open" and tr.leg == "long" and tr.group == "scalp"
         assert tr.agent == "Wira·scalp"
         assert tr.qty_remaining == tr.original_qty == 2.0
-        assert tr.entry > LONG_DECIDE["entry"]          # slippage adverse on entry (long -> fill higher)
+        assert tr.entry == pytest.approx(LONG_DECIDE["entry"])   # LIMIT maker fill: TEPAT di limit, no slippage
         assert tr.realized_pnl_usd < 0                  # entry fee sudah dipotong
         assert json.loads(tr.tps)[0]["label"] == "TP1"
 
 
-def test_manage_position_tp1_moves_sl_to_breakeven():
+def test_place_pending_then_fill_on_touch(monkeypatch):
+    """LIMIT order: pending -> terisi saat harga menyentuh limit (long: low<=limit)."""
+    Mk = _mk_session()
+    monkeypatch.setattr(arena, "SessionLocal", Mk)
+    d = dict(LONG_DECIDE, entry=99.0, sl=95.0)         # limit @ 99, di bawah mark 100
+    with Mk() as s:
+        tr = arena.place_pending(s, "scalp", "BTC", d, mark=100.0)
+        assert tr.status == "pending" and tr.entry_ts is not None   # = placed_ts (kompat tabel NOT NULL lama)
+        placed_at = tr.entry_ts
+        assert (tr.realized_pnl_usd or 0.0) == 0.0     # belum kena fee saat pending
+    events = arena.check_pending(_FakeCli([0, 100.0, 100.5, 98.5, 99.5]))   # low 98.5 <= 99 -> touch
+    assert any("terisi" in e for e in events)
+    with Mk() as s:
+        tr = s.scalars(select(DryRunTrade)).first()
+        assert tr.status == "open" and tr.entry_ts is not None and tr.entry_ts >= placed_at
+        assert tr.entry == pytest.approx(99.0)         # fill TEPAT di limit (maker)
+        assert tr.realized_pnl_usd < 0                 # fee entry dipotong saat fill
+
+
+def test_pending_cancels_on_run_away(monkeypatch):
+    """Harga kabur searah >CANCEL_RUN tanpa pullback -> limit batal (jangan chase)."""
+    Mk = _mk_session()
+    monkeypatch.setattr(arena, "SessionLocal", Mk)
+    with Mk() as s:
+        arena.place_pending(s, "scalp", "BTC", dict(LONG_DECIDE, entry=99.0, sl=95.0), mark=100.0)
+    # bar low 100.5 (tak sentuh 99), close 102 > 99*(1+0.02)=100.98 -> kabur -> batal
+    events = arena.check_pending(_FakeCli([0, 100.5, 103.0, 100.5, 102.0]))
+    assert any("batal" in e for e in events)
+    with Mk() as s:
+        tr = s.scalars(select(DryRunTrade)).first()
+        assert tr.status == "canceled" and tr.outcome == "canceled"
+
+
+def test_pending_counts_toward_max_open_slot(monkeypatch):
+    Mk = _mk_session()
+    with Mk() as s:
+        arena.place_pending(s, "scalp", "BTC", dict(LONG_DECIDE, entry=99.0), mark=100.0)
+        assert arena.active_count("scalp", s) == 1     # pending memesan slot
+        assert arena.open_count("scalp", s) == 0       # tapi belum 'open'
+
+
+def test_manage_position_scalp_single_tp_full_close():
+    """Scalp = SATU TP tutup 100% (main cepat). Tak ada BE/partial. R=5 -> TP @ 110 (2R)."""
     Mk = _mk_session()
     with Mk() as s:
         tr = arena.open_trade(s, "scalp", "BTC", LONG_DECIDE)
-        entry = tr.entry
-        tp1 = json.loads(tr.tps)[0]
-        # low DI ATAS entry (bar realistis: TP1 kena tapi harga tak pernah balik ke entry di bar yg sama)
-        events = arena.manage_position(s, tr, high=tp1["price"] + 1, low=entry + 1, close=tp1["price"])
+        tps = json.loads(tr.tps)
+        assert len(tps) == 1 and tps[0]["frac"] == 1.0 and tps[0]["price"] == pytest.approx(110.0)
+        events = arena.manage_position(s, tr, high=tps[0]["price"] + 1, low=101.0, close=tps[0]["price"])
         assert any("TP1" in e for e in events)
-        assert tr.sl == entry            # sl_after mode=be -> SL to breakeven
-        assert tr.qty_remaining < tr.original_qty
-        assert tr.status == "open"       # scalp TP1=50% -> masih ada sisa
+        assert tr.status == "closed" and tr.outcome == "tp_full"    # 100% sekaligus
+        assert tr.qty_remaining == 0.0
+        assert tr.r_multiple is not None and tr.r_multiple > 0
         fills = s.scalars(select(DryRunFill).where(DryRunFill.trade_id == tr.id)).all()
         assert len(fills) == 1 and fills[0].label == "TP1"
-
-
-def test_manage_position_full_tp_ladder_closes_trade():
-    """3 bar berurutan, tiap bar `low` dijaga TETAP DI ATAS SL yg baru saja di-evolve pada
-    bar itu (bar realistis — TP kena duluan, harga tak langsung retrace ke SL lama/baru)."""
-    Mk = _mk_session()
-    with Mk() as s:
-        tr = arena.open_trade(s, "scalp", "BTC", LONG_DECIDE)
-        # bar 1: TP1 (107.5) -> SL jadi BE(~entry, ~100.02); low dijaga > entry
-        arena.manage_position(s, tr, high=108.0, low=101.0, close=107.5)
-        assert tr.status == "open"
-        # bar 2: TP2 (112.5, trail 0.3%) -> SL trail jadi ~112.5*0.997=112.16; low dijaga > itu
-        arena.manage_position(s, tr, high=113.0, low=112.2, close=112.5)
-        assert tr.status == "open"
-        # bar 3: TP3 (120, frac 20% = SISA TERAKHIR) -> qty_remaining tepat 0, closed apapun low-nya
-        arena.manage_position(s, tr, high=120.5, low=119.0, close=120.0)
-        assert tr.status == "closed"
-        assert tr.outcome == "tp_full"
-        assert tr.qty_remaining == 0.0
-        assert tr.r_multiple is not None and tr.r_multiple > 0     # semua TP = untung
-        assert tr.closed_at is not None
 
 
 def test_manage_position_sl_hit_closes_with_loss():
@@ -95,33 +138,25 @@ def test_manage_position_sl_hit_closes_with_loss():
         assert len(fills) == 1 and fills[0].label == "SL"
 
 
-def test_manage_position_swing_moonbag_via_trailing():
-    """5 bar berurutan (TP1..TP4 lalu trailing-exit moonbag). Trailing SL DIEVALUASI ULANG
-    tiap bar (ratchet di awal `manage_position`, thd `close` bar ITU JUGA) — bukan cuma
-    saat TP baru fill — jadi `low` tiap bar dijaga di atas hasil ratchet TERBARU, bukan cuma
-    hasil trail dari TP yg baru saja fill di bar itu sendiri."""
-    swing_decide = dict(LONG_DECIDE, tps=tp_targets(1, 100.0, 95.0, mode="swing"))
+def test_manage_position_swing_4level_ladder_be_lock_trail():
+    """Swing 4-level: BE -> lock TP1 -> trailing 5% -> TP4 fixed tutup penuh. Trailing SL
+    DIEVALUASI ULANG tiap bar (ratchet di awal `manage_position` thd `close` bar ITU) — `low`
+    tiap bar dijaga di atas SL terbaru supaya tak exit prematur."""
+    # Swing 4-level (R=5 dari entry100/sl95): TP1 110(BE), TP2 117.5(lock), TP3 125(trail5%), TP4 135(tutup)
+    swing_decide = dict(LONG_DECIDE, tps=tp_targets(1, 100.0, 95.0, mode="swing", levels=4))
     Mk = _mk_session()
     with Mk() as s:
         tr = arena.open_trade(s, "swing", "ETH", swing_decide)
-        # TP1(107.5,be) -> SL~entry(~100.02)
-        arena.manage_position(s, tr, high=108.0, low=101.0, close=107.5)
-        # TP2(112.5,lock->TP1=107.5) -> SL=107.5; low dijaga >107.5
-        arena.manage_position(s, tr, high=113.0, low=108.0, close=112.5)
-        # TP3(120,trail 5%) -> tr.trail=0.05, SL=max(107.5,120*0.95=114)=114; low dijaga >114
-        arena.manage_position(s, tr, high=121.0, low=114.5, close=120.0)
-        # TP4(130,trail 8%): ratchet AWAL bar pakai trail LAMA(0.05) x close(130)=123.5 dulu
-        # (>114) SEBELUM TP4 diproses; TP4 fill set trail=0.08 tapi max(123.5,119.6)=123.5
-        # tetap menang -> SL efektif jadi 123.5, bukan 119.6. low dijaga >123.5.
-        arena.manage_position(s, tr, high=131.0, low=124.0, close=130.0)
-        assert tr.status == "open"           # moonbag masih terbuka (trailing, tanpa target fixed)
-        assert tr.qty_remaining > 0
-        assert tr.sl == pytest.approx(123.5, abs=0.01)
-        # bar terakhir: retrace di bawah SL efektif (123.5) -> moonbag exit
-        events = arena.manage_position(s, tr, high=124.0, low=122.0, close=122.0)
-        assert tr.status == "closed"
-        assert tr.outcome == "moonbag"
-        assert any("moonbag" in e for e in events)
+        arena.manage_position(s, tr, high=110.5, low=101.0, close=111)     # TP1@110 -> BE(~100.02)
+        assert tr.status == "open"
+        arena.manage_position(s, tr, high=118.0, low=111.0, close=118)     # TP2@117.5 -> lock TP1(110)
+        assert tr.status == "open"
+        arena.manage_position(s, tr, high=125.5, low=120.0, close=126)     # TP3@125 -> trail5%: SL=126*.95=119.7; low>itu
+        assert tr.status == "open" and tr.trail == pytest.approx(0.05)
+        events = arena.manage_position(s, tr, high=135.5, low=130.0, close=136)  # TP4@135 (level akhir) -> tutup penuh
+        assert tr.status == "closed" and tr.outcome == "tp_full"
+        assert tr.qty_remaining == 0.0 and tr.r_multiple is not None and tr.r_multiple > 0
+        assert any("TP4" in e for e in events)
 
 
 def test_moonbag_honors_own_trail_when_it_differs(monkeypatch):

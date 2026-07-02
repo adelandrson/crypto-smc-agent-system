@@ -24,3 +24,4 @@ deploy_to_test.sh
 # === OS ===
 .DS_Store
 Thumbs.db
+smc_runtime_config.json
