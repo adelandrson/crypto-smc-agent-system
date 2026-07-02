@@ -1,7 +1,7 @@
 #!/bin/bash
 # Supervisor IDEMPOTEN (jalan SBG EVIL) — sistem PEMBANDING crypto-smc-agent-system, berjalan
 # BERDAMPINGAN dengan crypto-quant-agent (path/port terpisah, tak saling ganggu):
-#   1) WEB UI    (FastAPI/uvicorn, port 8001 default) → dashboard
+#   1) WEB UI    (FastAPI/uvicorn, port 8002 default) → dashboard
 #   2) MONITOR   (loop dry-run near-real-time, src.smc.arena)
 #   3) TELEGRAM  (opsional — no-op graceful bila TELEGRAM_BOT_TOKEN kosong di .env)
 # Dipakai di @reboot DAN sbg watchdog cron (*/2) → auto-recover bila proses mati.
@@ -10,7 +10,7 @@
 set -o pipefail
 DST=/home/test/crypto-smc-agent
 HOST=${WEB_HOST:-127.0.0.1}
-PORT=${WEB_PORT:-8001}
+PORT=${WEB_PORT:-8002}
 INTERVAL=${MONITOR_INTERVAL:-20}
 
 LOCK=/tmp/smc_run_services.lock

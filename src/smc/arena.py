@@ -168,21 +168,34 @@ def manage_position(s, tr: DryRunTrade, high: float, low: float, close: float) -
 
 
 def check_open(cli=None) -> list[str]:
+    """Commit PER-POSISI (bukan 1 transaksi raksasa di akhir) -- posisi lain butuh scan
+    (screen_place, dry-run cron lain) BISA menulis DB bersamaan tanpa 'database is locked'
+    (ditemukan via live smoke test: 1 sesi lama menahan write-lock sepanjang scan network)."""
     cli = cli or BinanceAdapter()
     events: list[str] = []
+    trade_ids = []
     with SessionLocal() as s:
-        trades = s.scalars(select(DryRunTrade).where(DryRunTrade.status == "open")).all()
-        for tr in trades:
-            try:
-                bars = cli.fetch_ohlcv(f"{tr.symbol}/USDT", GROUPS[tr.group]["tf"], limit=2, market_type="perp")
-            except Exception as e:  # noqa: BLE001
-                events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
-                continue
-            if not bars:
-                continue
-            last = bars[-1]
-            events += manage_position(s, tr, last[2], last[3], last[4])
-        s.commit()
+        trade_ids = [tid for tid, in s.execute(
+            select(DryRunTrade.id).where(DryRunTrade.status == "open")).all()]
+    for tid in trade_ids:
+        try:
+            bars_fetched = None
+            with SessionLocal() as s:
+                tr = s.get(DryRunTrade, tid)
+                if not tr or tr.status != "open":
+                    continue
+                try:
+                    bars_fetched = cli.fetch_ohlcv(f"{tr.symbol}/USDT", GROUPS[tr.group]["tf"], limit=2, market_type="perp")
+                except Exception as e:  # noqa: BLE001
+                    events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
+                    continue
+                if not bars_fetched:
+                    continue
+                last = bars_fetched[-1]
+                events += manage_position(s, tr, last[2], last[3], last[4])
+                s.commit()
+        except Exception as e:  # noqa: BLE001
+            events.append(f"trade {tid}: error {type(e).__name__}")
     return events
 
 
@@ -211,7 +224,12 @@ def _snapshot(s, group: str, sym: str, d: dict) -> None:
 def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = None) -> int:
     """Scan universe (atau `symbols`) utk 1 gaya: decide() + SIMPAN snapshot semua hasil
     (open/skip, dgn alasan), buka posisi baru bila full_strong & lolos filter & masih ada
-    slot (max_open). Scan TERUS berjalan meski slot penuh -- snapshot tetap informatif."""
+    slot (max_open). Scan TERUS berjalan meski slot penuh -- snapshot tetap informatif.
+
+    Sesi DB dibuka PER-SIMBOL (bukan 1 sesi raksasa utk seluruh scan) -- scan network
+    (fetch_ohlcv+sentiment per simbol) bisa lama utk universe besar; 1 sesi panjang menahan
+    write-lock SQLite sepanjang itu, bikin writer lain (screen_place gaya lain, check_open,
+    endpoint web/chat/rnd_step) gagal 'database is locked'. Ditemukan via live smoke test."""
     cli = cli or BinanceAdapter()
     init_db()
     oi_tracker = OITracker()
@@ -219,30 +237,31 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     placed = 0
     with SessionLocal() as s:
         syms = symbols or universe_symbols(s)
-        eq = equity(group, s)
-        for sym in syms:
+    for sym in syms:
+        try:
+            candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type="perp")
+            sent = aggregate_sentiment([cli], f"{sym}/USDT")
+        except Exception:  # noqa: BLE001
+            continue
+        if not candles or len(candles) < MIN_CANDLES:
+            continue
+        now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
+        if not session_ok(now_dt, cfg["mode"], allow_asia=False):
+            continue
+        with SessionLocal() as s:
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
                 DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym, DryRunTrade.status == "open"))
             if has_pos:
+                s.commit()
                 continue
-            try:
-                candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type="perp")
-                sent = aggregate_sentiment([cli], f"{sym}/USDT")
-            except Exception:  # noqa: BLE001
-                continue
-            if not candles or len(candles) < MIN_CANDLES:
-                continue
+            eq = equity(group, s)
             oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), candles[-1][4])
-            now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
-            if not session_ok(now_dt, cfg["mode"], allow_asia=False):
-                continue
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
             _snapshot(s, group, sym, d)
             if d["action"] == "open" and open_count(group, s) < cfg["max_open"]:
-                open_trade(s, group, sym, d)
+                open_trade(s, group, sym, d)   # commit sendiri (lihat open_trade)
                 placed += 1
-                eq = equity(group, s)
-        s.commit()
+            s.commit()
     return placed
 
 

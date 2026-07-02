@@ -78,7 +78,7 @@ agents/*.md                     # IDENTITY/SOUL/AGENTS/MEMORY/TASKS/USER — kon
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env   # isi CMC_API_KEY minimal
 .venv/bin/python -m src.smc.universe        # bangun universe pertama kali
-.venv/bin/uvicorn src.web.app:app --host 0.0.0.0 --port 8001
+.venv/bin/uvicorn src.web.app:app --host 0.0.0.0 --port 8002
 ```
 
 ## Verifikasi
