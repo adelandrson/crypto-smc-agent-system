@@ -137,6 +137,19 @@ def manage_position(s, tr: DryRunTrade, high: float, low: float, close: float) -
         events.append(f"{tr.symbol} {tp['label']} hit @ {fill_px:.6g} ({pnl:+.2f}$)")
         _apply_sl_after(tr, tp, close, direction)   # bisa set tr.trail (assignment, latest wins)
 
+    # 2b. fase moonbag — begitu SEMUA TP berharga terisi, terapkan trail moonbag SENDIRI. Moonbag
+    # (price=None) tak pernah masuk loop fill, jadi sl_after-nya tak pernah kepasang -> sisa posisi
+    # diam-diam mewarisi trail TP terakhir. No-op di preset kita (swing TP4==moonbag==8%; scalp tak
+    # ada moonbag); menutup footgun sama spt fix upstream paper/broker.py (AUDIT.md §H sumber).
+    if tr.qty_remaining > 1e-12 and not any(t.get("price") is not None and not t["filled"] for t in tps):
+        mb = next((t for t in tps if t.get("price") is None and not t["filled"]), None)
+        sa = (mb or {}).get("sl_after") or {}
+        v = sa.get("value")
+        if sa.get("mode") == "trail" and v is not None and tr.trail != v:
+            tr.trail = v
+            tr.sl = max(tr.sl, close * (1 - v)) if direction > 0 else min(tr.sl, close * (1 + v))
+            changed = True
+
     # 3. stop-loss pada sisa qty (moonbag keluar lewat trailing SL di sini juga)
     if tr.qty_remaining > 1e-12:
         sl_hit = (direction > 0 and low <= tr.sl) or (direction < 0 and high >= tr.sl)

@@ -124,6 +124,32 @@ def test_manage_position_swing_moonbag_via_trailing():
         assert any("moonbag" in e for e in events)
 
 
+def test_moonbag_honors_own_trail_when_it_differs(monkeypatch):
+    """Regresi: fase moonbag pakai trail-nya SENDIRI, bukan mewarisi trail TP4. Preset kita
+    TP4==moonbag==8% (no-op); di sini sengaja beda (TP4=20%, moonbag=5%). Sinkron dgn fix
+    upstream paper/broker.py (AUDIT.md §H sumber)."""
+    import json
+    Mk = _mk_session()
+    tps = [
+        {"label": "TP1", "price": 103.0, "frac": 0.25, "filled": False, "sl_after": {"mode": "be"}},
+        {"label": "TP2", "price": 105.0, "frac": 0.25, "filled": False, "sl_after": {"mode": "lock", "lock_label": "TP1"}},
+        {"label": "TP3", "price": 150.0, "frac": 0.25, "filled": False, "sl_after": {"mode": "trail", "value": 0.20}},
+        {"label": "TP4", "price": 200.0, "frac": 0.15, "filled": False, "sl_after": {"mode": "trail", "value": 0.20}},
+        {"label": "TP5", "price": None, "frac": 0.10, "filled": False, "sl_after": {"mode": "trail", "value": 0.05}},
+    ]
+    with Mk() as s:
+        tr = arena.open_trade(s, "swing", "ETH", dict(LONG_DECIDE, entry=100.0, sl=98.0, tps=tps))
+        arena.manage_position(s, tr, 103.5, 100.5, 104)
+        arena.manage_position(s, tr, 105.5, 104, 106)
+        arena.manage_position(s, tr, 150.5, 149, 151)
+        arena.manage_position(s, tr, 200.5, 199, 201)   # TP4 -> fase moonbag -> trail 5% (entry di-fill ~100.02 dgn slippage)
+        assert tr.trail == pytest.approx(0.05)
+        assert tr.sl == pytest.approx(201 * 0.95, abs=0.5)   # ratchet ke trail moonbag seketika
+        events = arena.manage_position(s, tr, 201, 185, 200)   # low 185 < ~191 -> exit (trail lama 20% SL~160, tak exit)
+        assert tr.status == "closed" and tr.outcome == "moonbag"
+        assert any("moonbag" in e for e in events)
+
+
 def test_equity_and_open_count_across_open_and_closed(monkeypatch):
     Mk = _mk_session()
     monkeypatch.setattr(arena, "SessionLocal", Mk)
