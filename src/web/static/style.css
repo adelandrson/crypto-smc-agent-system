@@ -296,3 +296,18 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 :focus:not(:focus-visible) { outline: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; } }
+
+/* ── Admin: mode otoritas + seksi ── */
+.adm-sec { margin-bottom: 22px; }
+.adm-h { font-size: 14px; margin: 0 0 8px; color: var(--text); }
+.auth-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.auth-card { display: block; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); transition: border-color .15s, background .15s; }
+.auth-card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.auth-card.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); box-shadow: 0 0 0 1px var(--accent) inset; }
+.auth-card input { display: none; }
+.auth-h { display: flex; align-items: center; gap: 7px; font-size: 14px; }
+.auth-ic { font-size: 16px; }
+.auth-tag { margin-left: auto; font-size: 10px; color: var(--muted); background: var(--surface-2); padding: 2px 7px; border-radius: 999px; }
+.auth-d { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+.badge-set { font-size: 10px; color: var(--pos); font-weight: 600; }
+.badge-unset { font-size: 10px; color: var(--muted); }

@@ -335,27 +335,76 @@ async function loadAgent(silent) {
 let _adminToken = localStorage.getItem("smc_admin_token") || "";
 async function initAdmin() {
   const out = document.getElementById("adminOut");
-  out.innerHTML = `<div class="field"><label>Token admin</label><input id="admToken" type="password" value="${esc(_adminToken)}" placeholder="X-Admin-Token"></div>
-    <div id="admBody"><p class="muted">Masukkan token admin untuk mengelola konfigurasi LLM/Telegram.</p></div>`;
+  out.innerHTML = `<div class="field"><label>🔑 Password Admin</label><input id="admToken" type="password" value="${esc(_adminToken)}" placeholder="masukkan ADMIN_TOKEN"></div>
+    <p class="muted" style="font-size:12px;margin:-4px 0 14px">Password admin = <code>ADMIN_TOKEN</code>. Pertama kali: set di file <code>.env</code> runtime (<code>ADMIN_TOKEN=…</code>) lalu restart. Setelah itu bisa diganti dari panel ini (bagian Rahasia).</p>
+    <div id="admBody"><p class="muted">Masukkan password admin untuk mengelola mode otoritas agent, LLM, & kunci.</p></div>`;
   document.getElementById("admToken").onchange = e => { _adminToken = e.target.value.trim(); localStorage.setItem("smc_admin_token", _adminToken); loadAdminConfig(); };
   if (_adminToken) loadAdminConfig();
+}
+const _AUTH_META = {
+  none:   { icon: "🔒", label: "Tanpa Otoritas", tag: "default · paling aman",
+            desc: "Agent hanya OBSERVASI & ANALISA (FVG/struktur/sentimen/sinyal/status). Tidak bisa ubah config, tidak bisa edit kode, tidak bisa jalankan operasi." },
+  medium: { icon: "⚙️", label: "Menengah", tag: "config saja",
+            desc: "Agent bisa setel PARAMETER metodologi (gerbang, filter, leverage, dll) + operasi dry-run. TIDAK bisa edit kode." },
+  full:   { icon: "🔓", label: "Penuh", tag: "config + KODE · hati-hati",
+            desc: "Agent bisa edit KODE (write_source/run_tests, berlaku live) + parameter + operasi. Risiko RCE bila web terekspos publik — jaga localhost + tanpa kunci exchange withdraw." },
+};
+async function _fetchModels() {
+  try { const r = await fetch("/api/admin/models", { headers: { "X-Admin-Token": _adminToken } }); const d = await r.json(); return d.models || []; }
+  catch { return []; }
 }
 async function loadAdminConfig() {
   const body = document.getElementById("admBody");
   try {
     const r = await fetch("/api/admin/config", { headers: { "X-Admin-Token": _adminToken } });
-    if (!r.ok) { body.innerHTML = `<p class="muted">${r.status === 401 ? "token salah" : "admin nonaktif — set ADMIN_TOKEN di .env"}</p>`; return; }
+    if (!r.ok) { body.innerHTML = `<p class="muted">${r.status === 401 ? "Token salah." : "Admin nonaktif — set <code>ADMIN_TOKEN</code> di file <code>.env</code> lalu restart."}</p>`; return; }
     const cfg = await r.json();
-    body.innerHTML = Object.entries(cfg).map(([k, v]) => `
-      <div class="field"><label>${esc(k)}</label>
-        <input data-k="${esc(k)}" value="${typeof v === "object" ? "" : esc(v)}" placeholder="${typeof v === "object" ? (v.set ? v.hint : "belum diset") : ""}"></div>`).join("")
-      + `<button class="save-btn" id="admSave">Simpan</button><span id="adminMsg"></span>`;
+    const models = await _fetchModels();
+    const cur = cfg.agent_authority || "none";
+    const levels = cfg._authority_levels || ["none", "medium", "full"];
+
+    // 1) Mode otoritas agent — kartu radio
+    const authCards = levels.map(lv => { const m = _AUTH_META[lv] || { icon: "?", label: lv, tag: "", desc: "" };
+      return `<label class="auth-card ${cur === lv ? "sel" : ""}">
+        <input type="radio" name="authmode" value="${lv}" ${cur === lv ? "checked" : ""}>
+        <div class="auth-h"><span class="auth-ic">${m.icon}</span><b>${m.label}</b><span class="auth-tag">${m.tag}</span></div>
+        <div class="auth-d">${esc(m.desc)}</div></label>`; }).join("");
+
+    // 2) LLM — base URL (teks) + model orch/light (dropdown bila ada daftar model)
+    const modelSel = (k, v) => models.length
+      ? `<select data-k="${k}">${models.map(m => `<option ${m === v ? "selected" : ""}>${esc(m)}</option>`).join("")}${models.includes(v) ? "" : `<option selected>${esc(v || "")}</option>`}</select>`
+      : `<input data-k="${k}" value="${esc(v || "")}" placeholder="nama model">`;
+
+    // 3) Rahasia (password + badge set/unset)
+    const secretField = (k) => { const o = cfg[k] || {}; return `<div class="field"><label>${esc(k)} ${o.set ? `<span class="badge-set">✓ terpasang ${esc(o.hint)}</span>` : `<span class="badge-unset">belum diset</span>`}</label>
+      <input data-k="${k}" type="password" autocomplete="new-password" placeholder="${o.set ? "isi utk ganti…" : "isi kunci…"}"></div>`; };
+
+    body.innerHTML = `
+      <div class="adm-sec"><h3 class="adm-h">🤖 Mode Otoritas Agent</h3>
+        <p class="muted" style="margin:2px 0 10px">Menentukan seberapa jauh agent (Orin) boleh mengubah sistem. Berlaku langsung.</p>
+        <div class="auth-grid">${authCards}</div></div>
+      <div class="adm-sec"><h3 class="adm-h">🧠 LLM</h3>
+        <div class="field"><label>LLM_BASE_URL</label><input data-k="LLM_BASE_URL" value="${esc(cfg.LLM_BASE_URL || "")}" placeholder="http://…/v1"></div>
+        <div class="field"><label>Model Orchestrator</label>${modelSel("LLM_MODEL_ORCH", cfg.LLM_MODEL_ORCH)}</div>
+        <div class="field"><label>Model Ringan</label>${modelSel("LLM_MODEL_LIGHT", cfg.LLM_MODEL_LIGHT)}</div></div>
+      <div class="adm-sec"><h3 class="adm-h">🔑 Rahasia / Kunci</h3>
+        ${secretField("ADMIN_TOKEN")}${secretField("CMC_API_KEY")}${secretField("TELEGRAM_BOT_TOKEN")}
+        <div class="field"><label>TELEGRAM_ALLOWED_CHAT_IDS</label><input data-k="TELEGRAM_ALLOWED_CHAT_IDS" value="${esc(cfg.TELEGRAM_ALLOWED_CHAT_IDS || "")}" placeholder="123,456"></div></div>
+      <button class="save-btn" id="admSave">Simpan perubahan</button><span id="adminMsg"></span>`;
+
+    body.querySelectorAll(".auth-card input").forEach(i => i.onchange = () => {
+      body.querySelectorAll(".auth-card").forEach(c => c.classList.toggle("sel", c.querySelector("input").checked));
+    });
     document.getElementById("admSave").onclick = async () => {
-      const body2 = {};
-      body.querySelectorAll("[data-k]").forEach(i => { if (i.value.trim()) body2[i.dataset.k] = i.value.trim(); });
-      const r2 = await fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": _adminToken }, body: JSON.stringify(body2) });
+      const payload = {};
+      const am = body.querySelector("input[name=authmode]:checked"); if (am) payload.agent_authority = am.value;
+      body.querySelectorAll("[data-k]").forEach(i => { const val = (i.value || "").trim(); if (val) payload[i.dataset.k] = val; });
+      const r2 = await fetch("/api/admin/config", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": _adminToken }, body: JSON.stringify(payload) });
       const d2 = await r2.json();
-      document.getElementById("adminMsg").textContent = r2.ok ? `tersimpan: ${(d2.updated || []).join(", ") || "(tak ada perubahan)"}` : (d2.detail || "gagal");
+      const msg = document.getElementById("adminMsg");
+      msg.textContent = r2.ok ? `✓ tersimpan: ${(d2.updated || []).join(", ") || "(tak ada perubahan)"}` : (d2.detail || "gagal");
+      msg.className = r2.ok ? "pos" : "neg";
+      if (r2.ok) setTimeout(loadAdminConfig, 600);
     };
   } catch (e) { body.innerHTML = `<p class="muted">gagal memuat: ${esc(String(e))}</p>`; }
 }

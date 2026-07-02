@@ -123,25 +123,50 @@ def persona(agent: str) -> dict:
                        f"{a.get('role', '')} Jujur & berbasis data; jangan mengarang."}
 
 
+# ── GERBANG OTORITAS AGENT (disetel admin, agent tak bisa ubah) ──────────────
+# Tool yang MENGUBAH sesuatu, dikelompokkan per level. Level 'none' = hanya sisanya (read-only).
+_MEDIUM_TOOLS = {"config_set", "config_reset", "rnd_step", "rnd_universe_refresh"}  # ubah config/ops
+_FULL_TOOLS = {"write_source", "run_tests"}                                          # edit KODE
+
+
+def _authority_allows(name: str, mode: str) -> bool:
+    """True bila tool `name` diizinkan pada `mode` otoritas (none/medium/full)."""
+    if name in _FULL_TOOLS:
+        return mode == "full"
+    if name in _MEDIUM_TOOLS:
+        return mode in ("medium", "full")
+    return True   # read-only / analisa / status: selalu boleh
+
+
+def _current_authority() -> str:
+    try:
+        from src.smc import admin_settings
+        return admin_settings.get_authority()
+    except Exception:  # noqa: BLE001
+        return "none"   # gagal baca -> paling aman
+
+
 def agent_tools_spec(agent: str) -> list:
     from src.llm import skills
     a = AGENTS.get(agent) or {}
     names = a.get("skills", [])
+    mode = _current_authority()
     spec = skills.tools_spec()
-    if names == "*":
-        return spec
-    keep = set(names)
-    return [s for s in spec if s["function"]["name"] in keep]
+    if names != "*":
+        keep = set(names)
+        spec = [s for s in spec if s["function"]["name"] in keep]
+    return [s for s in spec if _authority_allows(s["function"]["name"], mode)]
 
 
 def agent_tool_impls(agent: str) -> dict:
     from src.llm import skills
     a = AGENTS.get(agent) or {}
     names = a.get("skills", [])
+    mode = _current_authority()
     impls = skills.tool_impls()
-    if names == "*":
-        return impls
-    return {n: fn for n, fn in impls.items() if n in set(names)}
+    if names != "*":
+        impls = {n: fn for n, fn in impls.items() if n in set(names)}
+    return {n: fn for n, fn in impls.items() if _authority_allows(n, mode)}
 
 
 def describe() -> str:

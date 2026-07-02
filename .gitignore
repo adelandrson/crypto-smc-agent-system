@@ -25,3 +25,4 @@ deploy_to_test.sh
 .DS_Store
 Thumbs.db
 smc_runtime_config.json
+admin_settings.json
