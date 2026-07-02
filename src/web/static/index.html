@@ -1,1 +1,101 @@
-<html><body>placeholder — Phase 5 builds the real UI</body></html>
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>crypto-smc · sistem pembanding SMC/FVG</title>
+  <link rel="stylesheet" href="/static/style.css?v=1">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">◈</span>
+        <div class="brand-text"><h1>crypto&#8209;smc</h1><p class="sub">pembanding · SMC/FVG</p></div>
+      </div>
+      <nav class="tabs">
+        <button class="tab is-active" data-tab="analyze"><span class="ic">◎</span> Analisa</button>
+        <button class="tab" data-tab="signals"><span class="ic">◆</span> Sinyal</button>
+        <button class="tab" data-tab="universe"><span class="ic">▤</span> Universe</button>
+        <button class="tab" data-tab="agent"><span class="ic">⌁</span> Agent</button>
+        <button class="tab" data-tab="admin"><span class="ic">⚙</span> Admin</button>
+      </nav>
+      <div class="side-foot">
+        <span id="status" class="status" title="status sistem">memuat…</span>
+        <button id="themeBtn" class="icon-btn" aria-label="ganti tema">◐</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section id="tab-analyze" class="panel is-active">
+        <h2 class="page-title">Analisa koin</h2>
+        <div class="search-wrap">
+          <form id="searchForm" class="search">
+            <input id="symInput" placeholder="Ketik simbol koin — mis. BTC, ETH, SOL…" autocomplete="off" spellcheck="false">
+            <button type="submit" id="goBtn">Analisa</button>
+          </form>
+        </div>
+        <p class="hint">Metodologi <b>Smart Money Concepts</b>: FVG + Fibonacci/Order Block/struktur, dikombinasi OI+FR+LSR jadi confluence score −4..+4. Trade hanya jika |score|≥2 & lolos semua filter.</p>
+        <div id="analyzeOut"></div>
+      </section>
+
+      <section id="tab-signals" class="panel">
+        <div class="section-head"><h2 class="page-title">Sinyal</h2><span id="signalsMeta" class="muted"></span></div>
+        <p class="hint">Kandidat confluence terbaru (|full_score|≥2) — scalp (5m) & swing (4h), disegarkan tiap siklus dry-run.</p>
+        <div class="screen-ctrl">
+          <label class="chip-toggle"><input type="checkbox" id="sigOnlyStrong" checked> hanya full_strong</label>
+        </div>
+        <div id="signalsOut"><p class="muted">memuat sinyal…</p></div>
+      </section>
+
+      <section id="tab-universe" class="panel">
+        <div class="section-head"><h2 class="page-title">Universe</h2><input id="uniSearch" class="uni-search" placeholder="Cari…"></div>
+        <p class="hint">CoinMarketCap, mcap ≥ $300M, exclude stablecoin/gold-index/derivative, harus Binance-perp-tradable. Tier dari volume 24h.</p>
+        <div id="universeOut"></div>
+      </section>
+
+      <section id="tab-agent" class="panel">
+        <div class="section-head">
+          <h2 class="page-title">Agent — dry-run</h2>
+          <div class="agent-actions">
+            <button id="agentRefresh" class="ctab">↻ Refresh</button>
+            <button id="agentLive" class="ctab on">● Live</button>
+            <button id="agentStep" class="ctab" title="Paksa 1 siklus dry-run sekarang">⚡ Step sekarang</button>
+            <button id="agentReset" class="ctab danger">⚠ Reset</button>
+          </div>
+        </div>
+        <p class="hint">Dry-run/paper — tidak ada dana nyata. <b>Expectancy (R)</b> adalah metrik utama, bukan win-rate mentah (metodologi ini hit-rate&lt;50% by design; edge datang dari R:R).</p>
+        <div id="agentSummary"></div>
+        <div id="agentOut"><div class="loading"><div class="spinner"></div> memuat…</div></div>
+      </section>
+
+      <section id="tab-admin" class="panel">
+        <h2 class="page-title">Admin</h2>
+        <div id="adminOut"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Chat mengambang dengan Orchestrator (Orin) -->
+  <button id="chatFab" class="chat-fab" title="Ngobrol dengan Orchestrator (Orin)" aria-label="buka chat">◈</button>
+  <div id="chatPanel" class="chat-panel">
+    <div class="chat-head">
+      <div class="chat-title" title="klik untuk perbesar"><span class="chat-dot"></span><b>Orin</b> <span class="muted">· Orchestrator</span><span id="chatUnread" class="chat-unread" hidden></span></div>
+      <button id="chatSess" class="icon-btn" title="histori sesi">🕘</button>
+      <button id="chatNew" class="icon-btn" title="sesi baru">✚</button>
+      <button id="chatMin" class="icon-btn" title="minimize">—</button>
+      <button id="chatClose" class="icon-btn" title="tutup">✕</button>
+    </div>
+    <div id="chatBody" class="chat-body"></div>
+    <div id="chatSessions" class="chat-sessions"></div>
+    <div id="chatCtx" class="chat-ctx muted"></div>
+    <div id="chatCmdHint" class="chat-cmdhint" hidden></div>
+    <form id="chatForm" class="chat-input" autocomplete="off">
+      <input id="chatInput" placeholder="Tanya soal confluence, sinyal, atau status dry-run…" autocomplete="off">
+      <button type="submit" aria-label="kirim">➤</button>
+    </form>
+  </div>
+
+  <script src="/static/app.js?v=1"></script>
+</body>
+</html>
