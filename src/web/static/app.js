@@ -237,9 +237,10 @@ function renderUniverse() {
   const q = (document.getElementById("uniSearch").value || "").toUpperCase();
   const rows = _uniRows.filter(r => !q || r.symbol.includes(q) || (r.name || "").toUpperCase().includes(q));
   if (!rows.length) { out.innerHTML = `<p class="muted">Belum ada data universe — jalankan refresh (chat: "refresh universe").</p>`; return; }
-  const thead = `<tr><th>Koin</th><th>Tier</th><th class="r">Mcap</th><th class="r">Volume 24h</th><th class="r">CMC Rank</th></tr>`;
+  const thead = `<tr><th>Koin</th><th>Tier Scalp</th><th>Tier Swing</th><th class="r">Mcap</th><th class="r">Volume 24h</th><th class="r">CMC Rank</th></tr>`;
+  const badge = t => `<span class="tier-badge ${esc(t || "")}">${esc(t || "—")}</span>`;
   const rowFn = r => `<tr><td><b>${esc(r.symbol)}</b> <span class="muted">${esc(r.name || "")}</span></td>
-    <td><span class="tier-badge ${esc(r.tier || "")}">${esc(r.tier || "—")}</span></td>
+    <td>${badge(r.scalp_tier)}</td><td>${badge(r.swing_tier)}</td>
     <td class="r">$${fmtUsd(r.market_cap)}</td><td class="r">$${fmtUsd(r.volume_24h)}</td>
     <td class="r muted">${r.cmc_rank ?? "—"}</td></tr>`;
   out.innerHTML = pagedTable("uni", "Universe", thead, rows, rowFn, { open: true, per: 20 });

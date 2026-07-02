@@ -16,6 +16,8 @@ import contextlib as _ctx
 import io as _io
 import os as _os
 import re as _re
+import subprocess as _subprocess
+import sys as _sys
 
 from src.smc.binance_adapter import BinanceAdapter
 from src.smc.confluence import analyze_confluence, fib_preset, ind, sfib
@@ -167,7 +169,8 @@ def tier_list(tier: str | None = None):
             q = q.where(Token.tier == tier.upper())
         rows = s.scalars(q.order_by(Token.market_cap.desc())).all()
         return [{"symbol": r.symbol, "name": r.name, "market_cap": r.market_cap,
-                 "volume_24h": r.volume_24h, "tier": r.tier, "cmc_rank": r.cmc_rank} for r in rows]
+                 "volume_24h": r.volume_24h, "scalp_tier": r.scalp_tier, "swing_tier": r.swing_tier,
+                 "cmc_rank": r.cmc_rank} for r in rows]
 
 
 def screening_highlights(group: str | None = None, full_strong_only: bool = True):
@@ -339,6 +342,63 @@ def config_reset(key: str = "", group: str = ""):
     return {"ok": True, "reset": key or "SEMUA override"}
 
 
+# ── LAPIS 5: WEWENANG PENUH atas KODE web (ubah logic/metodologi/sumber-data via edit kode) ──
+_WRITE_EXT = {".py", ".js", ".css", ".html", ".md", ".json", ".txt"}
+
+
+def _safe_write_target(path: str):
+    """Scoping TULIS: hanya pohon KODE (src/ atau tests/), ekstensi kode. Reuse blokir rahasia/DB/.env
+    dari _safe_target, lalu tambah: bukan skrip deploy/run/.git/.venv (batas keamanan)."""
+    target, err = _safe_target(path)
+    if err:
+        return None, err
+    rel = _os.path.relpath(target, _PROJECT_ROOT)
+    top = rel.split(_os.sep)[0]
+    if top not in ("src", "tests"):
+        return None, {"error": "TULIS hanya di src/ atau tests/ (logic/metodologi/engine/UI). "
+                               "Deploy/skrip/.env/rahasia/DB diblokir demi keamanan."}
+    if _os.path.splitext(rel)[1].lower() not in _WRITE_EXT:
+        return None, {"error": f"ekstensi tak diizinkan; boleh: {sorted(_WRITE_EXT)}"}
+    return target, None
+
+
+def write_source(path: str, content: str):
+    """WEWENANG PENUH (permintaan user): TULIS/timpa file KODE web (logic/metodologi/engine/UI/
+    sumber-data) di `src/` atau `tests/`. Perubahan berlaku LANGSUNG (uvicorn --reload). Diblokir
+    demi keamanan: .env/rahasia/DB/skrip-deploy/.git/.venv. ALUR WAJIB: read_file dulu → tulis →
+    run_tests → kalau merah PERBAIKI atau kembalikan (no green theatre). Return {ok, path, bytes}."""
+    if content is None:
+        return {"error": "content kosong"}
+    target, err = _safe_write_target(path)
+    if err:
+        return err
+    try:
+        _os.makedirs(_os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:200]}
+    return {"ok": True, "path": _os.path.relpath(target, _PROJECT_ROOT), "bytes": len(content),
+            "note": "berlaku live via uvicorn --reload — WAJIB jalankan run_tests untuk verifikasi."}
+
+
+def run_tests(target: str = "tests"):
+    """Jalankan pytest pada `target` (default tests/). Agen WAJIB verifikasi tiap perubahan kode
+    dgn ini (no green theatre). Return {ok, summary, tail}."""
+    tgt, err = _safe_target(target)
+    if err:
+        return err
+    rel = _os.path.relpath(tgt, _PROJECT_ROOT)
+    try:
+        p = _subprocess.run([_sys.executable, "-m", "pytest", rel, "-q"], cwd=_PROJECT_ROOT,
+                            capture_output=True, text=True, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:200]}
+    out = (p.stdout + p.stderr).strip().splitlines()
+    return {"ok": p.returncode == 0, "target": rel,
+            "summary": out[-1] if out else "", "tail": out[-15:]}
+
+
 # registry: nama -> (impl, schema-parameter, deskripsi)
 _TF = {"type": "string", "enum": ["5m", "15m", "1h", "4h", "1d"]}
 _SYM = {"symbol": {"type": "string", "description": "simbol koin, mis. BTC / ETH / SOL"}}
@@ -369,6 +429,9 @@ _SKILLS = {
                                   ["key", "value"]), config_set.__doc__.strip()),
     "config_reset": (config_reset, _p({"key": {"type": "string"}, "group": {"type": "string"}}, []),
                      config_reset.__doc__.strip()),
+    "write_source": (write_source, _p({"path": {"type": "string"}, "content": {"type": "string"}},
+                                      ["path", "content"]), write_source.__doc__.strip()),
+    "run_tests": (run_tests, _p({"target": {"type": "string"}}, []), run_tests.__doc__.strip()),
 }
 
 

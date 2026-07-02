@@ -9,7 +9,7 @@ tak tersentuh.
 from __future__ import annotations
 
 from src.smc.confluence import analyze_confluence, fib_preset
-from src.smc.risk import entry_plan, position_size, structure_sl, swing_tp_count, tp_targets
+from src.smc.risk import entry_plan, position_size, structure_sl, structure_tp_prices, swing_tp_count, tp_targets
 
 # ── konfigurasi per-gaya (penyesuaian eksplisit user, lihat plan) ──
 GROUPS = {
@@ -92,9 +92,14 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
         return {"action": "skip", "reason": "qty<=0", "confluence": c}
     risk_usd = qty * abs(entry - sl)
     mode = cfg.get("mode", "scalp")
-    # SWING: jumlah TP berkala (1..3) dari Volatility State + ATR (deterministik); SCALP: single 100%
+    # JUMLAH TP: SWING 1..3 dari Volatility+ATR; SCALP single. PENEMPATAN level: dari STRUKTUR
+    # (pool likuiditas / opposing OB / Fib extension), fallback R-multiple bila struktur kurang.
     levels = swing_tp_count(c.get("vol_state"), c.get("atr_percentile")) if mode == "swing" else 1
-    tps = tp_targets(direction, entry, sl, mode=mode, levels=levels)
+    n_tp = 1 if mode == "scalp" else levels
+    tp_px = structure_tp_prices(direction, entry, sl, order_blocks=c.get("order_blocks"),
+                                liquidity_pools=c.get("liquidity_pools"),
+                                fib_extensions=c.get("fib_extensions"), n=n_tp)
+    tps = tp_targets(direction, entry, sl, mode=mode, levels=levels, prices=tp_px)
     return {"action": "open", "symbol": symbol, "direction": direction, "entry": entry, "sl": sl,
             "order_type": order_type,
             "qty": qty, "leverage": lev, "margin_usd": round(notional / lev, 2) if lev else round(notional, 2),

@@ -79,5 +79,16 @@ def analyze(candles, config: Optional[dict] = None) -> dict:
         "volume_ok": volume_ok,
         "rsi_divergence": div["kind"],
         "momentum_score": div["momentum_score"],
+        "rsi_divergence_quality": div.get("quality", 0),   # 0-100 kualitas divergensi
+        "mtf_divergence": _mtf_div(candles, cfg),          # konfirmasi divergensi lintas-TF
         "divergence_pivots": div["pivot_indices"],
     }
+
+
+def _mtf_div(candles, cfg):
+    try:
+        from .mtf import mtf_divergence
+        return mtf_divergence(candles, factors=tuple(cfg.get("mtf_factors", (4, 12))),
+                              depth=cfg["pivot_depth"], rsi_period=cfg["rsi_period"])
+    except Exception:  # noqa: BLE001
+        return {"htf": {}, "mtf_score": 0, "aligned_count": 0}

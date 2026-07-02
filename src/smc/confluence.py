@@ -105,17 +105,24 @@ def analyze_confluence(candles_or_bars, fvg_config=None, fib_config=None,
     # booster like the Fib x FVG overlap. These do NOT change full_score (the
     # backtested -4..+4 primary stays the actionable threshold).
     ob_retest = fib.get("ob_retest") if fib.get("ok") else None
+    liquidity_sweep = fib.get("liquidity_sweep") if fib.get("ok") else None
     try:
         mom = ind.analyze(candles_or_bars, ind_config or {})
     except Exception:  # noqa: BLE001
         mom = {"ok": False}
     momentum_score = mom.get("momentum_score", 0) if mom.get("ok") else 0
+    momentum_quality = mom.get("rsi_divergence_quality", 0) if mom.get("ok") else 0
+    mtf_div = mom.get("mtf_divergence") if mom.get("ok") else None
     vol_state = mom.get("vol_state") if mom.get("ok") else None
     ranging = mom.get("ranging", False) if mom.get("ok") else False
     volume_ok = mom.get("volume_ok", True) if mom.get("ok") else True
-    # A+ extended: original A+ OR a fresh OB retest aligned with the price legs
+    # A+ extended: overlap Fib×FVG OR OB retest OR liquidity sweep OR MTF divergence (selaras arah)
     ob_boost = ob_retest is not None and fvg_score != 0 and fvg_score == fib_score
-    high_confluence = high_confluence or ob_boost
+    sweep_boost = bool(liquidity_sweep and liquidity_sweep.get("swept") and fvg_score != 0
+                       and liquidity_sweep.get("direction") == (1 if fvg_score > 0 else -1))
+    mtf_boost = bool(mtf_div and mtf_div.get("mtf_score") and fvg_score != 0
+                     and mtf_div.get("mtf_score") == (1 if fvg_score > 0 else -1))
+    high_confluence = high_confluence or ob_boost or sweep_boost or mtf_boost
     # confirmed = full_strong AND momentum aligns AND not ranging AND volume ok
     confirmed = (abs(full_score) >= 2 and momentum_score != 0
                  and momentum_score == (1 if full_score > 0 else -1)
@@ -135,12 +142,17 @@ def analyze_confluence(candles_or_bars, fvg_config=None, fib_config=None,
         "structure": structure,        # trend + BOS/CHoCH
         "order_blocks": fib.get("order_blocks") if fib.get("ok") else [],
         "ob_retest": ob_retest,
+        "liquidity_sweep": liquidity_sweep,   # EQH/EQL stop-hunt (booster A+ bila selaras)
+        "liquidity_pools": fib.get("liquidity_pools") if fib.get("ok") else None,  # target TP struktur
+        "fib_extensions": fib.get("fib_extensions") if fib.get("ok") else None,    # target TP struktur
         "analysis_score": analysis_score,     # FVG + Fib (range -2..+2)
         "full_score": full_score,             # + OI + FR (range -4..+4)
         "full_strong": abs(full_score) >= 2,  # multi-leg agreement (actionable)
         "fib_fvg_overlaps": overlaps,         # golden-pocket/OTE × active FVG
         "high_confluence": high_confluence,   # A+ setup flag (now incl. OB retest)
         "momentum_score": momentum_score,     # RSI divergence leg (confirmation)
+        "momentum_quality": momentum_quality,  # 0-100 kualitas divergensi RSI
+        "mtf_divergence": mtf_div,             # konfirmasi divergensi RSI lintas timeframe
         "vol_state": vol_state,               # trending/breakout/ranging/mixed
         "atr_percentile": mom.get("atr_percentile") if mom.get("ok") else None,  # 0..1 (jumlah TP swing)
         "ranging": ranging,                   # SKIP filter (scalp)

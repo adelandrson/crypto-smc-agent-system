@@ -81,6 +81,62 @@ def compute_cvd(adapter, symbol, timeframe="1h", limit=100, market_type="perp"):
             "cvd_score": cvd_score(ratio)}
 
 
+def _local_extrema(vals, depth=2):
+    """Pivot lokal (index, kind) pada deret: high = >= tetangga, low = <= tetangga."""
+    out = []
+    n = len(vals)
+    for i in range(depth, n - depth):
+        if all(vals[i] >= vals[j] for j in range(i - depth, i)) and \
+           all(vals[i] >= vals[j] for j in range(i + 1, i + depth + 1)):
+            out.append((i, "high"))
+        if all(vals[i] <= vals[j] for j in range(i - depth, i)) and \
+           all(vals[i] <= vals[j] for j in range(i + 1, i + depth + 1)):
+            out.append((i, "low"))
+    return out
+
+
+def cvd_divergence(closes, taker_buy, total_vol, depth=2):
+    """Divergensi CVD PER-CANDLE (bukan rasio agregat): delta = taker_buy - taker_sell tiap candle,
+    CVD = kumulatif. Bearish: harga higher-high tapi CVD lower-high -> -1. Bullish: harga lower-low
+    tapi CVD higher-low -> +1. Return {cvd_divergence: 'bull'|'bear'|None, cvd_div_score: +1|-1|0}."""
+    none = {"cvd_divergence": None, "cvd_div_score": 0}
+    n = min(len(closes), len(taker_buy), len(total_vol))
+    if n < 2 * depth + 3:
+        return none
+    closes, taker_buy, total_vol = closes[:n], taker_buy[:n], total_vol[:n]
+    delta = [2.0 * taker_buy[i] - total_vol[i] for i in range(n)]
+    cvd, run = [], 0.0
+    for d in delta:
+        run += d
+        cvd.append(run)
+    piv = _local_extrema(closes, depth)
+    highs = [i for i, k in piv if k == "high"]
+    lows = [i for i, k in piv if k == "low"]
+    if len(highs) >= 2:
+        i0, i1 = highs[-2], highs[-1]
+        if closes[i1] > closes[i0] and cvd[i1] < cvd[i0]:
+            return {"cvd_divergence": "bear", "cvd_div_score": -1}
+    if len(lows) >= 2:
+        i0, i1 = lows[-2], lows[-1]
+        if closes[i1] < closes[i0] and cvd[i1] > cvd[i0]:
+            return {"cvd_divergence": "bull", "cvd_div_score": 1}
+    return none
+
+
+def compute_cvd_divergence(adapter, symbol, timeframe="1h", limit=100, market_type="perp", depth=2):
+    """Ambil taker-buy + candle lalu hitung divergensi CVD per-candle (lihat cvd_divergence)."""
+    try:
+        tb = adapter.fetch_taker_buy_volume(symbol, timeframe, limit, market_type)
+        candles = adapter.fetch_ohlcv(symbol, timeframe, limit, market_type)
+    except Exception:  # noqa: BLE001
+        return {"cvd_divergence": None, "cvd_div_score": 0}
+    if not tb or not candles:
+        return {"cvd_divergence": None, "cvd_div_score": 0}
+    closes = [float(c[4]) for c in candles if len(c) > 5]
+    total = [float(c[5]) for c in candles if len(c) > 5]
+    return cvd_divergence(closes, tb, total, depth=depth)
+
+
 def combine_sentiment(per_venue: list) -> dict:
     """Pure aggregation from per-venue {funding_rate, open_interest, long_short_ratio} entries.
 

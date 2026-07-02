@@ -21,8 +21,9 @@ started=""
 
 # 1) WEB UI — pola match menyertakan --port $PORT (disambiguasi dari sistem lain yg sama-sama "src.web.app:app")
 if ! pgrep -u test -f "uvicorn src.web.app:app --host $HOST --port $PORT" >/dev/null 2>&1; then
+  # --reload: supaya write_source oleh agent (wewenang penuh) langsung berlaku live. Hanya watch src/.
   sudo -u test -H setsid bash -c \
-    "cd $DST && nohup .venv/bin/uvicorn src.web.app:app --host $HOST --port $PORT >> $DST/web.log 2>&1" </dev/null &
+    "cd $DST && nohup .venv/bin/uvicorn src.web.app:app --host $HOST --port $PORT --reload --reload-dir src >> $DST/web.log 2>&1" </dev/null &
   started="$started web"
 fi
 

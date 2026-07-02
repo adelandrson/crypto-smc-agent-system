@@ -63,14 +63,20 @@ def active_count(group: str, s) -> int:
         DryRunTrade.agent == _agent(group), DryRunTrade.status.in_(("pending", "open")))) or 0
 
 
-# Urutan tier-list S->A->B->C (koin tier atas dipindai/diisi lebih dulu), lalu volume 24h.
-TIER_ORDER = case((Token.tier == "S", 0), (Token.tier == "A", 1),
-                  (Token.tier == "B", 2), (Token.tier == "C", 3), else_=4)
+def _tier_order(col):
+    """Urutan tier S->A->B->C (koin tier atas dipindai lebih dulu) utk kolom tier apa pun."""
+    return case((col == "S", 0), (col == "A", 1), (col == "B", 2), (col == "C", 3), else_=4)
 
 
-def universe_symbols(s, limit: int = 200) -> list[str]:
+# legacy (dipakai /api/universe default) — pakai kolom tier lama (=swing_tier)
+TIER_ORDER = _tier_order(Token.tier)
+
+
+def universe_symbols(s, group: str = "scalp", limit: int = 200) -> list[str]:
+    """Simbol tradable urut tier GAYA tsb (scalp→scalp_tier, swing→swing_tier), lalu volume desc."""
+    col = Token.swing_tier if group == "swing" else Token.scalp_tier
     rows = s.scalars(select(Token.symbol).where(Token.in_watchlist.is_(True))
-                     .order_by(TIER_ORDER, Token.volume_24h.desc().nullslast()).limit(limit)).all()
+                     .order_by(_tier_order(col), Token.volume_24h.desc().nullslast()).limit(limit)).all()
     return list(rows)
 
 
@@ -362,7 +368,7 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     mkt = cfg.get("data_market_type", "perp")
     placed = 0
     with SessionLocal() as s:
-        syms = symbols or universe_symbols(s)
+        syms = symbols or universe_symbols(s, group=group)
     for sym in syms:
         try:
             candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type=mkt)

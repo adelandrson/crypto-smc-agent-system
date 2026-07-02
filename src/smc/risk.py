@@ -137,18 +137,59 @@ def entry_plan(direction: int, price: float, nearest_fvg, in_zone: bool,
     return limit_entry(direction, price, nearest_fvg, max_pullback, min_pullback), "limit"
 
 
-def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp", levels: int = 2):
-    """Rencana take-profit.
+def structure_tp_prices(direction: int, entry: float, sl: float, order_blocks=None,
+                        liquidity_pools=None, fib_extensions=None, n: int = 1,
+                        min_r: float = 1.0) -> list:
+    """Penempatan LEVEL TP dari STRUKTUR (jumlah TP dipisah dari DI MANA). Kandidat sisi profit:
+    pool likuiditas LAWAN (long→EQH / short→EQL), opposing OB (long→bearish / short→bullish),
+    Fib extension. Filter >= min_r*R, urut mendekat→menjauh, dedupe ~0.1R. Kurang → fallback R-multiple."""
+    R = abs(entry - sl) or (entry * 0.005)
+    cands: list = []
+    if liquidity_pools:
+        cands += list(liquidity_pools.get("eqh" if direction > 0 else "eql", []) or [])
+    for ob in (order_blocks or []):
+        if direction > 0 and ob.get("type") == "bear" and ob.get("bottom") is not None:
+            cands.append(ob["bottom"])
+        elif direction < 0 and ob.get("type") == "bull" and ob.get("top") is not None:
+            cands.append(ob["top"])
+    if fib_extensions:
+        cands += [x for x in fib_extensions if x is not None]
+    floor = entry + direction * min_r * R
+    valid = sorted({round(float(x), 10) for x in cands
+                    if (direction > 0 and x >= floor) or (direction < 0 and x <= floor)},
+                   reverse=(direction < 0))
+    out: list = []
+    for x in valid:
+        if not out or abs(x - out[-1]) >= 0.1 * R:
+            out.append(x)
+        if len(out) >= n:
+            break
+    fb = [2.0, 3.5, 5.0, 7.0]
+    while len(out) < n:
+        m = fb[min(len(out), len(fb) - 1)]
+        lvl = round(entry + direction * m * R, 10)
+        if out and ((direction > 0 and lvl <= out[-1]) or (direction < 0 and lvl >= out[-1])):
+            lvl = round(out[-1] + direction * R, 10)
+        out.append(lvl)
+    return out[:n]
 
-    mode='scalp' — MAIN CEPAT: SATU TP tutup 100% di 2R, tanpa TP berkala/SL-evolution.
-    mode='swing' — TP BERKALA 1..3 level (fixed, sum=100%) sesuai `levels` (dari swing_tp_count:
-        Volatility+ATR); SL evolution BE->lock-TP1 di level antara.
+
+def tp_targets(direction: int, entry: float, sl: float, mode: str = "scalp", levels: int = 2,
+               prices: list | None = None):
+    """Rencana take-profit. JUMLAH level (mode/levels) dipisah dari PENEMPATAN level (`prices`).
+
+    mode='scalp' — MAIN CEPAT: SATU TP tutup 100%, tanpa SL-evolution.
+    mode='swing' — TP BERKALA 1..3 level (fixed, sum=100%); SL evolution BE->lock-TP1.
+    `prices` (opsional) = harga TP dari struktur (structure_tp_prices); None → R-multiple.
     """
     R = abs(entry - sl)
     if mode == "scalp":
-        plan = [("TP1", 2.0, 1.00, {})]                      # 100% sekaligus (main cepat)
+        plan = [("TP1", 2.0, 1.00, {})]
     else:  # swing
         plan = _SWING_LADDERS[levels if levels in _SWING_LADDERS else 2]
-    return [{"label": lbl, "price": entry + direction * mult * R,
-             "frac": frac, "filled": False, "sl_after": sa}
-            for lbl, mult, frac, sa in plan]
+    out = []
+    for i, (lbl, mult, frac, sa) in enumerate(plan):
+        px = prices[i] if (prices and i < len(prices) and prices[i] is not None) \
+            else entry + direction * mult * R
+        out.append({"label": lbl, "price": px, "frac": frac, "filled": False, "sl_after": sa})
+    return out

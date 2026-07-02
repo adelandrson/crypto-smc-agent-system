@@ -46,7 +46,11 @@ class Token(Base):
     market_cap: Mapped[float | None] = mapped_column(Float)
     volume_24h: Mapped[float | None] = mapped_column(Float)
     cmc_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # S | A | B | C
+    tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # legacy (=swing_tier)
+    scalp_tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # S/A/B/C mcap40/vol60
+    swing_tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # S/A/B/C mcap60/vol40
+    scalp_score: Mapped[float | None] = mapped_column(Float)
+    swing_score: Mapped[float | None] = mapped_column(Float)
     tradable: Mapped[bool] = mapped_column(Boolean, default=False)     # listed Binance perp/spot
     # None = ditrack; selain itu: stablecoin | tokenized-gold | wrapped-tokens | liquid-staking | derivative
     exclude_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)

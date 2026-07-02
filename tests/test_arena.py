@@ -42,17 +42,18 @@ class _FakeCli:
 
 
 def test_universe_symbols_ordered_by_tier_then_volume():
-    """Universe dipindai urut tier S->A->B->C, lalu volume 24h desc di dalam tier."""
+    """Universe dipindai urut tier GAYA S->A->B->C, lalu volume desc. Tier scalp vs swing terpisah."""
     Mk = _mk_session()
     with Mk() as s:
         s.add_all([
-            Token(token_id=1, symbol="CCC", in_watchlist=True, tier="C", volume_24h=9e9),
-            Token(token_id=2, symbol="SSS", in_watchlist=True, tier="S", volume_24h=10.0),
-            Token(token_id=3, symbol="AAA", in_watchlist=True, tier="A", volume_24h=50.0),
-            Token(token_id=4, symbol="SS2", in_watchlist=True, tier="S", volume_24h=99.0),
+            Token(token_id=1, symbol="CCC", in_watchlist=True, scalp_tier="C", swing_tier="S", volume_24h=9e9),
+            Token(token_id=2, symbol="SSS", in_watchlist=True, scalp_tier="S", swing_tier="C", volume_24h=10.0),
+            Token(token_id=3, symbol="AAA", in_watchlist=True, scalp_tier="A", swing_tier="A", volume_24h=50.0),
+            Token(token_id=4, symbol="SS2", in_watchlist=True, scalp_tier="S", swing_tier="C", volume_24h=99.0),
         ])
         s.commit()
-        assert arena.universe_symbols(s) == ["SS2", "SSS", "AAA", "CCC"]
+        assert arena.universe_symbols(s, group="scalp") == ["SS2", "SSS", "AAA", "CCC"]   # by scalp_tier
+        assert arena.universe_symbols(s, group="swing")[0] == "CCC"                        # by swing_tier (S)
 
 
 def test_open_trade_persists_fields_and_deducts_fee():
