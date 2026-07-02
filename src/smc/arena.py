@@ -21,7 +21,7 @@ from src.smc.oi_tracker import OITracker
 from src.smc.sentiment import aggregate_sentiment
 from src.smc.session import session_ok
 from src.storage.db import SessionLocal, init_db
-from src.storage.models import DryRunFill, DryRunTrade, Token
+from src.storage.models import DryRunFill, DryRunTrade, SignalSnapshot, Token
 
 START_EQUITY = 1000.0
 TAKER_FEE = 0.00055    # sama persis dgn paper/broker.py PaperBroker default
@@ -187,7 +187,31 @@ def check_open(cli=None) -> list[str]:
 
 
 # ── screening (scan universe -> decide -> buka posisi baru) ──────────────────
+def _snapshot(s, group: str, sym: str, d: dict) -> None:
+    """Simpan hasil decide() (open ATAU skip) ke SignalSnapshot — isi halaman Sinyal +
+    dasar skill screening_highlights. Ditulis utk SEMUA simbol yg dievaluasi (bukan cuma
+    yg dibuka), termasuk alasan skip -- transparansi penuh (SOUL.md: no green theatre)."""
+    c = d.get("confluence") or {}
+    tps = d.get("tps")
+    s.add(SignalSnapshot(
+        ts=_now(), symbol=sym, group=group,
+        full_score=d.get("full_score", c.get("full_score", 0)),
+        full_strong=bool(c.get("full_strong", d["action"] == "open")),
+        high_confluence=bool(d.get("high_confluence", c.get("high_confluence", False))),
+        confirmed=bool(c.get("confirmed", False)),
+        zone=d.get("zone", c.get("zone")),
+        direction=d.get("direction"),
+        entry=d.get("entry"), sl=d.get("sl"),
+        tps_json=json.dumps(tps) if tps else None,
+        reason=None if d["action"] == "open" else (d.get("reason") or "")[:120],
+        detail_json=json.dumps(c, default=str)[:6000] if c else None,
+    ))
+
+
 def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = None) -> int:
+    """Scan universe (atau `symbols`) utk 1 gaya: decide() + SIMPAN snapshot semua hasil
+    (open/skip, dgn alasan), buka posisi baru bila full_strong & lolos filter & masih ada
+    slot (max_open). Scan TERUS berjalan meski slot penuh -- snapshot tetap informatif."""
     cli = cli or BinanceAdapter()
     init_db()
     oi_tracker = OITracker()
@@ -197,8 +221,6 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
         syms = symbols or universe_symbols(s)
         eq = equity(group, s)
         for sym in syms:
-            if open_count(group, s) >= cfg["max_open"]:
-                break
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
                 DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym, DryRunTrade.status == "open"))
             if has_pos:
@@ -215,10 +237,12 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             if not session_ok(now_dt, cfg["mode"], allow_asia=False):
                 continue
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
-            if d["action"] == "open":
+            _snapshot(s, group, sym, d)
+            if d["action"] == "open" and open_count(group, s) < cfg["max_open"]:
                 open_trade(s, group, sym, d)
                 placed += 1
                 eq = equity(group, s)
+        s.commit()
     return placed
 
 
