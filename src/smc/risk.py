@@ -29,6 +29,23 @@ def fmt_price(p: Optional[float]) -> str:
     return f"{round(p, d):.{d}f}"
 
 
+def fmt_num(p):
+    """Versi NUMERIK fmt_price: bulatkan ke 5/4 angka utama, return float (bukan string) supaya
+    output skill yang dibaca agent LLM ringkas — agent tak lagi menulis 0.33136625999999997."""
+    if p is None:
+        return None
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return p
+    if math.isnan(p) or p == 0:
+        return p
+    a = abs(p)
+    sig = 5 if a >= 1000 else 4
+    d = sig - 1 - math.floor(math.log10(a))
+    return round(p, d)
+
+
 def limit_entry(direction: int, price: float, nearest_fvg: Optional[dict],
                 max_pullback: float = 0.05, min_pullback: float = 0.0015) -> float:
     """Harga LIMIT ORDER (retest zona imbalance) — bukan market di harga kini. SMC entry presisi:

@@ -21,9 +21,36 @@ from src.smc.binance_adapter import BinanceAdapter
 from src.smc.confluence import analyze_confluence, fib_preset, ind, sfib
 from src.smc.decide import GROUPS, decide
 from src.smc.fvg_adapter import analyze_for_confluence
+from src.smc.risk import fmt_num
 from src.smc.sentiment import aggregate_sentiment
 
 _PROJECT_ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
+
+# Field/koleksi yang berisi HARGA — dibulatkan ke angka utama (5/4) sebelum ke agent LLM, supaya
+# agent tak menulis nominal panjang (mis. 0.33136625999999997) di chat/Telegram. Skor/frac/pct
+# TIDAK disentuh (bukan harga).
+_PRICE_KEYS = {"entry", "sl", "price", "mark_price", "top", "bottom", "high", "low", "close",
+               "open", "mid", "upper", "lower", "last_swing_high", "last_swing_low", "target",
+               "gp_low", "gp_high", "vah", "val", "poc", "fill", "fill_px"}
+_PRICE_LIST_KEYS = {"golden_pocket", "ote_zone", "fvg_zone", "zone", "levels", "prices"}
+
+
+def _shorten_prices(obj):
+    """Rekursif: bulatkan setiap nilai harga ke angka utama (fmt_num). Kunci non-harga (score,
+    frac, pct, ratio, z, id, ts, dst.) dibiarkan apa adanya."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if k in _PRICE_KEYS and isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = fmt_num(v)
+            elif k in _PRICE_LIST_KEYS and isinstance(v, list):
+                out[k] = [fmt_num(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else _shorten_prices(x) for x in v]
+            else:
+                out[k] = _shorten_prices(v)
+        return out
+    if isinstance(obj, list):
+        return [_shorten_prices(x) for x in obj]
+    return obj
 _WRITE_KW = _re.compile(r"\b(insert|update|delete|drop|alter|create|replace|attach|detach|pragma|vacuum|reindex|truncate|grant|revoke)\b")
 _SECRET_HINT = ("secret", "credential", "password", "token", "apikey", "api_key")
 
@@ -350,5 +377,12 @@ def tools_spec() -> list[dict]:
             for n, (_fn, p, d) in _SKILLS.items()]
 
 
+def _shortened(fn):
+    """Bungkus impl skill: bulatkan semua field harga di hasil ke angka utama sebelum ke agent."""
+    def inner(**kwargs):
+        return _shorten_prices(fn(**kwargs))
+    return inner
+
+
 def tool_impls() -> dict:
-    return {n: fn for n, (fn, _p, _d) in _SKILLS.items()}
+    return {n: _shortened(fn) for n, (fn, _p, _d) in _SKILLS.items()}
