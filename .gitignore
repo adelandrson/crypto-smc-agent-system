@@ -1,0 +1,26 @@
+# === Secret & data — JANGAN commit ===
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+.oi_state.sqlite
+
+# === venv & cache ===
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# === Runtime output ===
+*.log
+reports/
+
+# === Workflow lokal (sandbox-spesifik, bukan bagian produk) ===
+deploy_to_test.sh
+
+# === OS ===
+.DS_Store
+Thumbs.db
