@@ -81,6 +81,7 @@ class DryRunTrade(Base):
     risk_usd: Mapped[float] = mapped_column(Float)
     margin_usd: Mapped[float] = mapped_column(Float)                    # modal terkomit (notional/leverage, capped)
     tps: Mapped[str] = mapped_column(Text)                              # JSON: rencana TP bertahap (risk.tp_targets)
+    trail: Mapped[float | None] = mapped_column(Float)                  # fraksi trailing AKTIF (TP terakhir yg set mode=trail menang — sama spt Position.trail sumber)
     # ── snapshot confluence saat entry (audit) ──
     full_score: Mapped[int] = mapped_column(Integer)                    # -4..+4
     zone: Mapped[str] = mapped_column(String(16))                       # premium | discount | equilibrium
