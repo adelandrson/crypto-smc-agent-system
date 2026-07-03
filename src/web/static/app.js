@@ -229,6 +229,8 @@ function _confluenceSection(title, d) {
 let _lwChart = null, _lwCandle = null, _lwVol = null, _chartData = null, _chartDecs = 2, _chartTf = "1h";
 let _priceLines = [];
 const _ind = { fvg: true, fib: true, ob: true, struct: true, liq: true, vol: true };  // saklar indikator
+let _obFilter = "all";   // saklar Order Block: all | demand | supply (hindari tumpang-tindih demand/supply)
+const _obShow = o => _obFilter === "all" || (_obFilter === "demand") === (o.type === "bull");
 function _chartCols() {
   const dark = document.documentElement.getAttribute("data-theme") !== "light";
   return { text: dark ? "#93a1b0" : "#556", grid: dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.05)" };
@@ -324,7 +326,7 @@ function _drawBoxes() {
     if (label && hh >= 9) { ctx.fillStyle = stroke; ctx.font = "9px system-ui,sans-serif"; ctx.fillText(label, x1 + 3, yy + hh / 2 + 3); }
   };
   if (_ind.fvg) (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.5)" : "rgba(239,83,80,.5)", b ? "FVG↑" : "FVG↓"); });
-  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull", fresh = o.status !== "mitigated"; box(o.from, o.top, o.bottom, b ? (fresh ? "rgba(66,165,245,.14)" : "rgba(66,165,245,.05)") : (fresh ? "rgba(255,167,38,.14)" : "rgba(255,167,38,.05)"), b ? "rgba(66,165,245,.6)" : "rgba(255,167,38,.6)", b ? "OB↑ demand" : "OB↓ supply"); });
+  if (_ind.ob) (d.order_blocks || []).forEach(o => { if (!_obShow(o)) return; const b = o.type === "bull", fresh = o.status !== "mitigated"; box(o.from, o.top, o.bottom, b ? (fresh ? "rgba(66,165,245,.14)" : "rgba(66,165,245,.05)") : (fresh ? "rgba(255,167,38,.14)" : "rgba(255,167,38,.05)"), b ? "rgba(66,165,245,.6)" : "rgba(255,167,38,.6)", (b ? "OB↑ demand" : "OB↓ supply") + (o.flip ? " ⇄flip" : "")); });
 }
 // panel indikator: saklar checkbox bernama + detail AREA HARGA tiap deteksi
 function _renderIndicatorPanel(d) {
@@ -335,7 +337,9 @@ function _renderIndicatorPanel(d) {
     chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
   const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
   const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} ${f.zone === "discount" ? '<span class="pos">diskon</span>' : f.zone === "premium" ? '<span class="neg">premium</span>' : ""} <span class="muted">${esc(f.state || "")}</span>`);
-  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? '<span style="color:#66a5f5">↑ demand</span>' : '<span style="color:#ff9800">↓ supply</span>'} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
+  const obL = (d.order_blocks || []).filter(_obShow).map(o => `${o.type === "bull" ? '<span style="color:#66a5f5">↑ demand</span>' : '<span style="color:#ff9800">↓ supply</span>'} ${_cp(o.bottom)}–${_cp(o.top)}${o.flip ? ' <span style="color:#c792ea" title="OB demand & supply tumpang-tindih = key level kuat">⇄flip</span>' : ""} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
+  const obSeg = `<span class="ob-seg">${[["all", "Semua"], ["demand", "↑demand"], ["supply", "↓supply"]].map(([f, t]) => `<button type="button" data-obf="${f}" class="${_obFilter === f ? "on" : ""}">${t}</button>`).join("")}</span>`;
+  const obRow = `<div class="ind-row"><input type="checkbox" data-ind="ob"${_ind.ob ? " checked" : ""}><span class="ind-sw" style="background:#66a5f5"></span><b class="ind-name">Order Block <span class="muted">(${(d.order_blocks || []).length})</span></b>${obSeg}<span class="ind-detail">${obL.length ? obL.join(" · ") : '<span class="muted">tak terdeteksi</span>'}</span></div>`;
   const fibL = [];
   const _tr = (d.structure || {}).trend;
   const _fdate = s => { try { const dt = new Date(s * 1000); return `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`; } catch (e) { return ""; } };
@@ -362,12 +366,13 @@ function _renderIndicatorPanel(d) {
     <div class="ind-list">
       ${row("fvg", "#26a69a", `FVG <span class="muted">(${(d.fvg || []).length})</span>`, fvgL)}
       ${row("fib", "#e6b800", "Fibonacci · GP/OTE/EQ", fibL)}
-      ${row("ob", "#66a5f5", `Order Block <span class="muted">(${(d.order_blocks || []).length}) · <span style="color:#66a5f5">demand↑</span>/<span style="color:#ff9800">supply↓</span></span>`, obL)}
+      ${obRow}
       ${row("struct", "#ef5350", "Struktur · Swing H/L", stL)}
       ${row("liq", "#ff9800", "Liquidity · EQH/EQL/Sweep", liqL)}
       ${row("vol", "#8aa0b0", "Volume", null, `<span class="muted">histogram bawah chart</span>`)}
     </div>`;
   panel.querySelectorAll("input[data-ind]").forEach(cb => cb.onchange = () => { _ind[cb.dataset.ind] = cb.checked; _applyOverlays(); });
+  panel.querySelectorAll("button[data-obf]").forEach(bt => bt.onclick = () => { _obFilter = bt.dataset.obf; if (!_ind.ob) { _ind.ob = true; } _applyOverlays(); _renderIndicatorPanel(_chartData); });
 }
 document.querySelectorAll("#tfTabs button").forEach(b => b.onclick = () => { if (_activeSym) renderChart(_activeSym, b.dataset.tf); });
 

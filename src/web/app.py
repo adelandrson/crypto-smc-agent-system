@@ -239,6 +239,9 @@ def chart_api(symbol: str, tf: str = "1h"):
         else:
             mo.append(dict(o))
     obs = mo
+    for o in obs:                               # FLIP ZONE: OB demand & supply tumpang-tindih (breaker/
+        o["flip"] = any(x is not o and x["type"] != o["type"]   # mitigation) = key level kuat (2 pihak setuju)
+                        and o["bottom"] <= x["top"] and o["top"] >= x["bottom"] for x in obs)
     # SWING PENUH utk chart: engine hanya kirim 8 terakhir (analisa internal tetap pakai semua) ->
     # hitung ulang seluruh swing signifikan supaya histori chart lengkap (trend terbaca akurat visual).
     from src.engines.sfib.core import normalize_bars as _nbz, compute_atr as _caz
