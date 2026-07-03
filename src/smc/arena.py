@@ -271,14 +271,15 @@ def check_pending(cli=None) -> list[str]:
                 cfg = effective_groups().get(tr.group, {})
                 mkt = cfg.get("data_market_type", "perp")
                 try:
-                    bars = cli.fetch_ohlcv(f"{tr.symbol}/USDT", cfg.get("tf", "5m"), limit=2, market_type=mkt)
+                    bars = cli.fetch_ohlcv(f"{tr.symbol}/USDT", cfg.get("tf", "5m"), limit=3, market_type=mkt)
                 except Exception as e:  # noqa: BLE001
                     events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
                     continue
-                if not bars:
+                if not bars or len(bars) < 2:
                     continue
                 direction = 1 if tr.leg == "long" else -1
-                high, low, close = bars[-1][2], bars[-1][3], bars[-1][4]
+                bar = bars[-2]                     # candle CLOSED terakhir (bukan forming) — no repaint
+                high, low, close = bar[2], bar[3], bar[4]
                 touched = (direction > 0 and low <= tr.entry) or (direction < 0 and high >= tr.entry)
                 if touched:
                     events.append(fill_pending(s, tr)); s.commit(); continue
@@ -316,13 +317,13 @@ def check_open(cli=None) -> list[str]:
                 _cfg = effective_groups().get(tr.group, GROUPS.get(tr.group, {}))
                 try:
                     bars_fetched = cli.fetch_ohlcv(f"{tr.symbol}/USDT", _cfg.get("tf", "5m"),
-                                                   limit=2, market_type=_cfg.get("data_market_type", "perp"))
+                                                   limit=3, market_type=_cfg.get("data_market_type", "perp"))
                 except Exception as e:  # noqa: BLE001
                     events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
                     continue
-                if not bars_fetched:
+                if not bars_fetched or len(bars_fetched) < 2:
                     continue
-                last = bars_fetched[-1]
+                last = bars_fetched[-2]             # candle CLOSED terakhir (bukan forming) — no repaint
                 events += manage_position(s, tr, last[2], last[3], last[4])
                 s.commit()
         except Exception as e:  # noqa: BLE001
@@ -375,8 +376,13 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             sent = aggregate_sentiment([cli], f"{sym}/USDT")
         except Exception:  # noqa: BLE001
             continue
-        if not candles or len(candles) < MIN_CANDLES:
+        if not candles or len(candles) < MIN_CANDLES + 1:
             continue
+        mark_price = candles[-1][4]        # harga TERKINI (candle yg masih terbentuk)
+        candles = candles[:-1]             # BUANG candle forming -> PUTUSKAN di candle CLOSED terakhir.
+        #   Candle forming punya volume & OHLC PARSIAL: volume_z bias rendah (filter volume menolak)
+        #   + high/low/close repaint. Inilah ROOT CAUSE "0 trade": sinyal full_strong tertolak
+        #   filter volume krn dinilai di candle setengah-jadi. (Live: 4/5 koin FLIP tolak->terima.)
         now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
         if not session_ok(now_dt, cfg["mode"], allow_asia=False):
             continue
@@ -388,15 +394,15 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
                 s.commit()
                 continue
             eq = equity(group, s)
-            oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), candles[-1][4])
+            oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), mark_price)
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
             _snapshot(s, group, sym, d)
             # slot dari active (pending+open). Entry FLEKSIBEL: market=isi seketika, limit=pending
             if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:
                 if d.get("order_type") == "market":
-                    open_market(s, group, sym, d, mark=candles[-1][4])
+                    open_market(s, group, sym, d, mark=mark_price)
                 else:
-                    place_pending(s, group, sym, d, mark=candles[-1][4])
+                    place_pending(s, group, sym, d, mark=mark_price)
                 placed += 1
             s.commit()
     return placed
