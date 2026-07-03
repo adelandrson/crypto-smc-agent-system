@@ -292,6 +292,7 @@ def test_pump_guard_blocks_long_gates_short():
     v = pump_guard(C, "B")
     assert v["is_pump"] and v["block_long"] and v["short_ok"]
     assert abs(v["short_sl"] - 14.9) < 0.01 and abs(v["short_tp"] - 10.1) < 0.05   # SL = local sideways wick
+    assert v["order_type"] == "market" and v["rr"] >= 3.0 and abs(v["short_entry"] - 13.8) < 0.01
     # volume sideways SAMA (tak ada local-peak) -> distribusi belum final
     for i in range(31, len(C)):
         C[i][5] = 650.0

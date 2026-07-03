@@ -89,10 +89,11 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
                                    max_pullback=cfg.get("limit_max_pullback", 0.05),
                                    min_pullback=cfg.get("limit_min_pullback", 0.0015))
     sl = structure_sl(direction, entry, c["nearest_fvg"], c["structure"])
-    # SHORT crime-pump: SL = harga WICK TERTINGGI selama pump (jaga bila pump lanjut), bukan struktur biasa
-    pump_short = bool(pump and pump.get("short_ok") and direction < 0 and pump.get("short_sl"))
-    if pump_short and pump["short_sl"] > entry:
-        sl = pump["short_sl"]
+    # SHORT crime-pump: entry/order/SL dari pump_guard (distribusi multi-TF + RR 1:3, SL=local sideways
+    # wick), override entry/SL struktur biasa. Entry = MARKET di area sideways bila RR>=1:3, else skip.
+    pump_short = bool(pump and pump.get("short_ok") and direction < 0 and pump.get("short_entry"))
+    if pump_short:
+        entry, order_type, sl = pump["short_entry"], pump["order_type"], pump["short_sl"]
     if (direction > 0 and sl >= entry) or (direction < 0 and sl <= entry):
         return {"action": "skip", "reason": "invalid SL vs entry", "confluence": c}
     stop_dist = abs(entry - sl) / entry

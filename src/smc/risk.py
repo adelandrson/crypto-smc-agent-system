@@ -98,83 +98,104 @@ def funding_gate(direction: int, funding_rate, entry: float, tp_price, mode: str
     return True, ""
 
 
-def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, spike_mult: float = 6.0,
-               pump_min: float = 0.30, wick_min: float = 0.45, base_quantile: float = 0.7,
-               block_above: float = 0.15, sideways_win: int = 8, sideways_band: float = 0.12,
-               local_mult: float = 1.15, min_room: float = 0.05, tp_margin: float = 0.01) -> dict:
-    """Deteksi 'crime pump/dump' koin TIER RENDAH (A/B/C) — cermin paper/risk.py sumber.
-    PUMP: baseline volume kecil-konsisten -> SPIKE volume angkat harga (artifisial) -> BLOKIR LONG.
-    DISTRIBUSI FINAL (syarat SHORT): (1) harga SIDEWAYS di atas (high berkelompok + >=2 wick-reject
-    atas); (2) volume sideways relatif sejajar dgn LOCAL-peak volume di tengah (lebih tinggi dari
-    tetangga kiri&kanan, BUKAN global-max) pada candle wick-reject. Bila terpenuhi & masih ada room:
-    SHORT SL = wick tertinggi saat SIDEWAYS (local), TP 100% = ~<=tp_margin di atas pra-pump. Return: is_pump/block_long/
-    short_ok/pre_pump_price/peak_price/short_sl/short_tp/pump_pct/reason."""
+def _dist_short(dc, win, pre, tp, wick_min, sideways_band, local_mult, min_rr, _med):
+    """Cek DISTRIBUSI FINAL + entry di satu TF `dc`. Return dict entry bila valid RR>=min_rr, else None.
+    Distribusi final: (1) sideways di atas (high berkelompok) + >=2 wick-reject atas; (2) LOCAL-peak
+    volume (lebih tinggi dari tetangga kiri-kanan, bukan global-max) pd candle wick-reject.
+    SL=wick tertinggi SIDEWAYS (local). Entry: MARKET di harga kini bila RR>=min_rr; jika sudah di
+    bawah floor RR-1:3 -> None (telat, skip TF ini)."""
+    if not dc or len(dc) < max(10, win):
+        return None
+    o = [x[1] for x in dc]; h = [x[2] for x in dc]; l = [x[3] for x in dc]
+    c = [x[4] for x in dc]; v = [x[5] for x in dc]
+    wI = [i for i in range(len(dc) - win, len(dc)) if i >= 0]
+    if len(wI) < 5:
+        return None
+
+    def uw(i):
+        r = h[i] - l[i]
+        return (h[i] - max(o[i], c[i])) / r if r > 0 else 0.0
+
+    wh = [h[i] for i in wI]
+    sideways = (max(wh) - min(wh)) / max(wh) < sideways_band if max(wh) > 0 else False
+    rej = sum(1 for i in wI if uw(i) >= wick_min)
+    vm = _med([v[i] for i in wI])
+    local_peak = any(v[wI[j]] > v[wI[j - 1]] and v[wI[j]] > v[wI[j + 1]] and v[wI[j]] >= vm * local_mult
+                     and uw(wI[j]) >= wick_min for j in range(1, len(wI) - 1))
+    if not (sideways and rej >= 2 and local_peak):
+        return None
+    sl = max(wh)                                    # SL = wick TERTINGGI saat SIDEWAYS (local)
+    cur = c[-1]
+    if not (tp < cur < sl):                         # harga harus di antara TP & SL
+        return None
+    floor = (min_rr * sl + tp) / (min_rr + 1)       # entry TERENDAH utk RR>=min_rr (short)
+    if cur < floor:                                 # sudah di bawah floor -> TELAT, skip TF ini
+        return None
+    rr = (cur - tp) / (sl - cur) if sl > cur else 0.0
+    return {"sl": sl, "entry": cur, "order": "market", "rr": rr, "sideways_high": sl}
+
+
+def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=None, min_rr: float = 3.0,
+               spike_mult: float = 6.0, pump_min: float = 0.30, wick_min: float = 0.45,
+               base_quantile: float = 0.7, block_above: float = 0.15, sideways_win: int = 8,
+               sideways_band: float = 0.12, local_mult: float = 1.15, tp_margin: float = 0.01) -> dict:
+    """Deteksi 'crime pump/dump' koin TIER RENDAH (A/B/C) — deterministik, MULTI-TIMEFRAME.
+
+    PUMP-MACRO (di `candles`, ~30 hari): baseline volume kecil-konsisten -> SPIKE volume angkat harga
+    (artifisial) -> BLOKIR LONG selama harga masih di puncak.
+
+    DISTRIBUSI FINAL + SHORT — dinilai lintas TF (`dist_tfs`, urut kasar->halus mis. 1D>4h>1h>15m)
+    karena crime-pump ada yang lambat (LAB/Rave/OM) & sangat cepat (Manta): TF halus menangkap yang
+    cepat lebih awal. Untuk tiap TF: (1) sideways-top + >=2 wick-reject; (2) LOCAL-peak volume (bukan
+    global-max) wick-reject. SL = wick tertinggi SIDEWAYS (local). TP 100% = ~tp_margin di atas pra-pump.
+    ENTRY: MARKET di harga kini bila RR>=`min_rr` (1:3); bila sudah di bawah floor RR-1:3 -> SKIP (telat).
+    Ambil TF PERTAMA (dari daftar) yang memberi entry valid.
+
+    Return: is_pump/block_long/short_ok/pre_pump_price/peak_price/short_sl/short_tp/short_entry/
+    order_type/dist_tf/rr/pump_pct/reason."""
     out = {"is_pump": False, "block_long": False, "short_ok": False, "pre_pump_price": None,
-           "peak_price": None, "short_sl": None, "short_tp": None, "pump_pct": None, "reason": ""}
+           "peak_price": None, "short_sl": None, "short_tp": None, "short_entry": None,
+           "order_type": None, "dist_tf": None, "rr": None, "pump_pct": None, "reason": ""}
     if tier not in ("A", "B", "C") or not candles or len(candles) < 30:
         return out
-    o = [c[1] for c in candles]; h = [c[2] for c in candles]
-    lo = [c[3] for c in candles]; cl = [c[4] for c in candles]; v = [c[5] for c in candles]
 
     def _med(xs):
         s = sorted(xs)
         return s[len(s) // 2] if s else 0.0
 
-    def uwick(i):
-        rng = h[i] - lo[i]
-        return (h[i] - max(o[i], cl[i])) / rng if rng > 0 else 0.0
-
-    sv = sorted(v)
-    base = _med(sv[:max(1, int(len(sv) * base_quantile))])
+    h = [c[2] for c in candles]; cl = [c[4] for c in candles]; v = [c[5] for c in candles]
+    base = _med(sorted(v)[:max(1, int(len(v) * base_quantile))])
     if base <= 0:
         return out
-    spikes = [i for i, vol in enumerate(v) if vol > base * spike_mult]
+    spikes = [i for i, x in enumerate(v) if x > base * spike_mult]
     if not spikes:
         return out
     s0 = spikes[0]
     pre = _med(cl[max(0, s0 - 5):s0] or [cl[0]])
     if pre <= 0:
         return out
-    peak = max(h[s0:])                                       # puncak pump (info; SL short pakai local sideways wick)
+    peak = max(h[s0:])
     pump_pct = (peak - pre) / pre
     if pump_pct < pump_min:
         return out
     out.update(is_pump=True, pre_pump_price=pre, peak_price=peak, pump_pct=pump_pct)
+    tp = pre * (1 + tp_margin)
+    out["short_tp"] = tp
+    out["block_long"] = cl[-1] > pre * (1 + block_above)      # harga masih di puncak pump -> jangan LONG
     out["reason"] = (f"crime-pump tier {tier}: +{pump_pct * 100:.0f}% dari {pre:.6g} "
                      f"(spike volume {len(spikes)}× > {spike_mult:.0f}×baseline)")
-    # DISTRIBUSI FINAL dinilai di TF HALUS (mis. 1h) bila disediakan (sideways-top jelas di 1h)
-    use_dist = bool(dist_candles) and len(dist_candles) >= max(10, dist_win)
-    dc = dist_candles if use_dist else candles
-    dw = dist_win if use_dist else sideways_win
-    dh = [x[2] for x in dc]; dl = [x[3] for x in dc]; do = [x[1] for x in dc]
-    dclose = [x[4] for x in dc]; dv = [x[5] for x in dc]
-    cur = dclose[-1]
-    out["block_long"] = cur > pre * (1 + block_above)
 
-    def duw(i):
-        rng = dh[i] - dl[i]
-        return (dh[i] - max(do[i], dclose[i])) / rng if rng > 0 else 0.0
-
-    wI = [i for i in range(len(dc) - dw, len(dc)) if i >= 0]
-    if len(wI) < 5:
-        return out
-    wh = [dh[i] for i in wI]
-    sideways = (max(wh) - min(wh)) / max(wh) < sideways_band if max(wh) > 0 else False
-    rejections = sum(1 for i in wI if duw(i) >= wick_min)
-    wv_med = _med([dv[i] for i in wI])
-    local_peak = any(
-        dv[wI[j]] > dv[wI[j - 1]] and dv[wI[j]] > dv[wI[j + 1]] and dv[wI[j]] >= wv_med * local_mult
-        and duw(wI[j]) >= wick_min
-        for j in range(1, len(wI) - 1))
-    room = cur > pre * (1 + min_room) and cur < peak * 0.98
-    out["short_ok"] = bool(sideways and rejections >= 2 and local_peak and room)
-    if out["short_ok"]:
-        out["short_sl"] = max(wh)                           # SL = wick TERTINGGI saat SIDEWAYS (local, bukan puncak pump)
-        out["short_tp"] = pre * (1 + tp_margin)
-        out["reason"] += (f"; DISTRIBUSI FINAL 1h (sideways-top + local-peak-vol wick-reject) → SHORT "
-                          f"SL {out['short_sl']:.6g} (local wick) / TP {out['short_tp']:.6g}")
+    tfs = dist_tfs or ([("dist", dist_candles, dist_win)] if dist_candles else
+                       [("macro", candles, sideways_win)])
+    for name, dc, win in tfs:
+        r = _dist_short(dc, win, pre, tp, wick_min, sideways_band, local_mult, min_rr, _med)
+        if r:
+            out.update(short_ok=True, short_sl=r["sl"], short_entry=r["entry"],
+                       order_type=r["order"], dist_tf=name, rr=r["rr"])
+            out["reason"] += (f"; DISTRIBUSI FINAL {name} → SHORT {r['order']} @ {r['entry']:.6g} "
+                              f"SL {r['sl']:.6g} (local wick) TP {tp:.6g} RR {r['rr']:.1f}")
+            break
     return out
-
 
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:
     """Base-asset qty so that hitting SL loses exactly risk% of equity."""

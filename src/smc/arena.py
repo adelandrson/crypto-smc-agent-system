@@ -359,18 +359,22 @@ def _pump_for(cli, sym: str, tier, mkt: str):
     if tier not in ("A", "B", "C"):
         return None
     try:
-        htf = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)   # macro pump 30-42 hari
-        if not htf or len(htf) < 40:
+        c4h = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)   # macro pump 30-42 hari
+        if not c4h or len(c4h) < 40:
             return None
-        key = htf[-1][0]
+        key = c4h[-1][0]
         cached = _PUMP_CACHE.get(sym)
         if cached and cached[0] == key:
             return cached[1]
-        try:
-            ltf = cli.fetch_ohlcv(f"{sym}/USDT", "1h", limit=300, market_type=mkt)   # distribusi halus 1h
-        except Exception:  # noqa: BLE001
-            ltf = None
-        verdict = pump_guard(htf[:-1], tier, dist_candles=(ltf[:-1] if ltf else None))
+        tfs = []                                          # distribusi lintas TF: 1D>4h>1h>15m
+        for tf, lim, win in (("1d", 90, 6), ("4h", 250, 8), ("1h", 300, 18), ("15m", 500, 32)):
+            try:
+                cc = cli.fetch_ohlcv(f"{sym}/USDT", tf, limit=lim, market_type=mkt)
+                if cc and len(cc) >= max(10, win) + 1:
+                    tfs.append((tf, cc[:-1], win))        # buang candle berjalan
+            except Exception:  # noqa: BLE001
+                pass
+        verdict = pump_guard(c4h[:-1], tier, dist_tfs=tfs or None)
         _PUMP_CACHE[sym] = (key, verdict)
         return verdict
     except Exception:  # noqa: BLE001

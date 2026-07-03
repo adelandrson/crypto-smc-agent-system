@@ -151,13 +151,14 @@ mengubah rentang skor.
   sebelumnya konsisten sangat
   kecil (baseline), lalu **spike volume** mengangkat harga tinggi (pump artifisial). Aksi:
   - **BLOKIR LONG** selama harga masih di puncak pump.
-  - **SHORT hanya bila DISTRIBUSI FINAL** — dua syarat: (1) harga mulai **sideways di atas** (high
-    berkelompok) dengan **beberapa wick-rejection atas**; (2) volume sideways relatif sejajar dengan
-    sebuah **local-peak volume** di tengahnya (lebih tinggi dari tetangga kiri-kanan — **bukan** volume
-    tertinggi keseluruhan) pada candle wick-rejection = penanda bandar telah menyelesaikan distribusi.
-    **SL = harga wick tertinggi selama pump** (jaga bila pump lanjut); **TP 100% ≈ ≤1% di atas harga
-    pra-pump** (retrace penuh; sisa volume = retail FOMO di atas). *(Detektor konservatif: hanya
-    memicu short pada distribusi bersih; pump yang dump seketika tetap memblokir long.)*
+  - **SHORT hanya bila DISTRIBUSI FINAL** — dinilai **multi-timeframe (1D→4h→1h→15m)** karena crime-pump
+    ada yang lambat (LAB/Rave/OM) & sangat cepat (Manta): TF halus menangkap yang cepat lebih awal.
+    Dua syarat: (1) harga **sideways di atas** (high berkelompok) + **beberapa wick-rejection atas**;
+    (2) **local-peak volume** di tengah sideways (lebih tinggi dari tetangga kiri-kanan — **bukan**
+    volume tertinggi keseluruhan) pada candle wick-rejection. **SL = wick tertinggi saat sideways**
+    (local); **TP 100% ≈ ≤1% di atas harga pra-pump**. **ENTRY:** market di area sideways bila **RR ≥
+    1:3**; bila harga sudah di bawah floor RR-1:3 → **skip** (telat). *(Long diblokir di semua kasus
+    pump; short hanya pada setup RR≥3 — pump yang dump seketika seperti Manta: long diblokir, short di-skip.)*
 
 **Entry FLEKSIBEL** — harga kini **sudah di zona** (FVG/OB/OTE) → **market**; belum → **limit** di
 retest zona (pending → terisi saat pullback / batal bila TTL habis atau harga kabur).
