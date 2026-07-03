@@ -119,13 +119,12 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
         direction = 1 if fib["direction"] == "up" else -1
         ob_retest = _retest(price, direction, order_blocks)
 
-    # Liquidity sweep / EQH-EQL (stop-hunt) — booster A+ (entry SMC bagus terjadi SETELAH sweep)
-    from .sweep import detect_sweep, find_liquidity_pools
-    _tol = cfg.get("sweep_tol_mult", 0.15) * (atr[-1] if atr else 0.0)
-    liquidity_sweep = detect_sweep(bars, swings, atr,
-                                   tol_mult=cfg.get("sweep_tol_mult", 0.15),
-                                   lookback=cfg.get("sweep_lookback", 3))
-    liquidity_pools = find_liquidity_pools(swings, _tol if _tol > 0 else 0.001 * price)
+    # Liquidity: BSL/SSL (setiap swing high/low) + EQH/EQL (pool terkuat) + sweep (booster A+)
+    from .sweep import detect_sweep, liquidity_map
+    _tm = cfg.get("sweep_tol_mult", 0.35)
+    liquidity_sweep = detect_sweep(bars, swings, atr, tol_mult=_tm, lookback=cfg.get("sweep_lookback", 3))
+    liq_map = liquidity_map(swings, atr, price, tol_mult=_tm)
+    liquidity_pools = {"eqh": liq_map["eqh"], "eql": liq_map["eql"]}
     # Fib extension = target proyeksi di luar E (penempatan TP struktur-based)
     fib_extensions = sorted(fib.get("extensions", {}).values())
 
@@ -140,6 +139,7 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
         "ob_retest": ob_retest,
         "liquidity_sweep": liquidity_sweep,
         "liquidity_pools": liquidity_pools,   # {eqh:[...], eql:[...]} — target TP struktur
+        "liquidity_map": liq_map,             # BSL/SSL (semua swing high/low) + EQH/EQL + tol
         "fib_extensions": fib_extensions,     # level proyeksi Fib (target TP)
         "active_leg": {
             "origin_index": O_piv.index,

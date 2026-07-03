@@ -53,3 +53,12 @@ def test_no_sweep_when_close_stays_through():
 def test_no_pool_no_sweep():
     swings = [Pivot(0, 0, 90.0, "low"), Pivot(1, 1, 100.0, "high")]  # tak ada >=2 equal
     assert detect_sweep([_bar(0, 95, 96, 80, 95)], swings, [1.0])["swept"] is False
+
+
+def test_sweep_against_plain_swing_high_is_bsl():
+    """Swing high tunggal (bukan EQH) di-sweep -> type BSL (likuiditas di atas high mana pun)."""
+    swings = [Pivot(0, 0, 110.0, "high"), Pivot(2, 2, 100.0, "low")]
+    atr = [1.0] * 12
+    bars = [_bar(0, 108, 110, 107, 109), _bar(1, 108, 111.0, 107, 108.0)]   # bar1 tembus high@0, close balik
+    s = detect_sweep(bars, swings, atr)
+    assert s["swept"] and s["direction"] == -1 and s["type"] == "BSL" and s["equal"] is False

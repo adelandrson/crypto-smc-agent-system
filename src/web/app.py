@@ -285,11 +285,11 @@ def chart_api(symbol: str, tf: str = "1h"):
     near = lambda z: 0.0 if z["bottom"] <= px <= z["top"] else min(abs(px - z["top"]), abs(px - z["bottom"]))
     fvgs.sort(key=near)                          # zona terdekat harga dulu (paling tradeable)
     obs.sort(key=near)
-    # LIKUIDITAS: EQH/EQL pool (jarang) + BSL/SSL = swing high di atas / swing low di bawah harga
-    highs_above = sorted(s["price"] for s in swings if s["kind"] == "high" and s["price"] > px)
-    lows_below = sorted((s["price"] for s in swings if s["kind"] == "low" and s["price"] < px), reverse=True)
-    bsl = highs_above[0] if highs_above else None    # buy-side liquidity terdekat (stops di atas high)
-    ssl = lows_below[0] if lows_below else None       # sell-side liquidity terdekat (stops di bawah low)
+    # LIKUIDITAS (dari engine liquidity_map): SETIAP swing high = BSL, low = SSL; EQH/EQL = pool terkuat.
+    # Ambil 3 terdekat di atas (BSL) & 3 di bawah (SSL) harga; tandai mana yg EQH/EQL.
+    lm = sf.get("liquidity_map") or {}
+    bsl = [{"level": b["level"], "eq": b["equal"]} for b in (lm.get("bsl") or []) if b["level"] > px][:3]
+    ssl = [{"level": s["level"], "eq": s["equal"]} for s in (lm.get("ssl") or []) if s["level"] < px][-3:][::-1]
     fib = (sf.get("active_leg") or {}).get("fib") or {}
     struct = sf.get("structure") or {}
     eq = fib.get("equilibrium")             # COMBO FVG×Fib: FVG di bawah 0.5 = zona DISKON (BUY win-rate tinggi)
@@ -311,7 +311,8 @@ def chart_api(symbol: str, tf: str = "1h"):
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction"), "swing_low": fib_sl, "swing_high": fib_sh,
                 "origin": _o, "extreme": _e},
-        "liquidity": {"sweep": sf.get("liquidity_sweep"), "pools": sf.get("liquidity_pools"),
+        "liquidity": {"sweep": sf.get("liquidity_sweep"),
+                      "eqh": (lm.get("eqh") or []), "eql": (lm.get("eql") or []),
                       "bsl": bsl, "ssl": ssl},
         "fib_extensions": sf.get("fib_extensions"),
         "structure": {"trend": struct.get("trend"), "event": struct.get("event"),

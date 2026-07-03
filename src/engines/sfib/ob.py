@@ -21,23 +21,44 @@ def _is_bullish(b: Bar) -> bool:
     return b.close >= b.open
 
 
+def _impulse_has_fvg(bars: Sequence[Bar], a_idx: int, b_idx: int, want_bull: bool) -> bool:
+    """Apakah impuls [a_idx..b_idx] meninggalkan FVG (3-candle imbalance) searah? (rule validitas OB:
+    OB sah butuh displacement yg meninggalkan FVG — tanpa FVG, OB lemah)."""
+    for i in range(max(2, a_idx), min(len(bars), b_idx + 1)):
+        if want_bull and bars[i].low > bars[i - 2].high:
+            return True
+        if (not want_bull) and bars[i].high < bars[i - 2].low:
+            return True
+    return False
+
+
+def _leg_broke_structure(swings: Sequence[Pivot], k: int, extreme: Pivot) -> bool:
+    """Apakah ekstrem leg MENEMBUS swing sejenis sebelumnya? (BOS — rule: tanpa BOS bukan OB)."""
+    for j in range(k - 2, -1, -1):
+        if swings[j].kind == extreme.kind:
+            return (extreme.price > swings[j].price) if extreme.kind == "high" \
+                else (extreme.price < swings[j].price)
+    return True                                  # leg pertama -> tak ada acuan, izinkan
+
+
 def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
                         lookback: int = 10, max_blocks: int = 4,
                         atr: Optional[Sequence[float]] = None,
-                        refine_mult: float = 1.5) -> List[dict]:
-    """Find the most recent OB zones from the swing sequence.
+                        refine_mult: float = 1.5, require_bos: bool = True,
+                        require_fvg: bool = True) -> List[dict]:
+    """Find the most recent VALID OB zones from the swing sequence.
 
-    For each confirmed swing leg (O->E), the OB is the last opposite-colour
-    candle at or before the origin pivot, within `lookback` bars. A zone is
-    [low, high] of that candle (full range) — REFINED to the candle BODY when the
-    full range is oversized (> refine_mult x ATR; giant candles otherwise paint a
-    zone so wide that later opposite OBs nest inside it, confusing the read).
+    For each confirmed swing leg (O->E), the OB is the last opposite-colour candle at or before the
+    origin pivot, within `lookback` bars. A zone is [low, high] of that candle (full range) — REFINED
+    to the candle BODY when the full range is oversized (> refine_mult x ATR).
 
-    Lifecycle: `fresh` (untouched, highest quality) -> `mitigated` (price traded
-    back INTO the zone) -> `broken` (a candle CLOSED beyond the far edge: below a
-    bull OB / above a bear OB). A broken OB is INVALID as its original type — it
-    no longer acts as demand/supply (at best it flips into a breaker for the
-    other side), so consumers should drop it.
+    VALIDITY (SMC rules): (a) the impulse must BREAK STRUCTURE (BOS) — extreme exceeds the prior
+    same-kind swing; without BOS it is just a candle, not an OB. (b) the impulse must leave a
+    FAIR VALUE GAP (imbalance) — without displacement/FVG the OB is weak. Both required by default
+    so we mark only high-quality institutional zones (not every pullback near price).
+
+    Lifecycle: `fresh` (untouched) -> `mitigated` (price traded back INTO the zone) -> `broken`
+    (a candle CLOSED beyond the far edge). Broken = INVALID; consumers drop it.
     """
     out: List[dict] = []
     if len(swings) < 2 or not bars:
@@ -51,6 +72,13 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
         extreme = swings[k]
         direction = "up" if extreme.price > origin.price else "down"
         want_bull = direction == "up"        # up-leg -> look for bearish OB candle
+        # RULE BOS: impuls wajib menembus struktur sejenis sebelumnya
+        if require_bos and not _leg_broke_structure(swings, k, extreme):
+            continue
+        # RULE FVG: impuls wajib meninggalkan imbalance
+        has_fvg = _impulse_has_fvg(bars, origin.index, extreme.index, want_bull)
+        if require_fvg and not has_fvg:
+            continue
         start = max(0, origin.index - lookback)
         end = origin.index
         ob_bar = None
@@ -91,6 +119,8 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
             "index": ob_bar,
             "leg_direction": direction,
             "refined": refined,
+            "has_fvg": has_fvg,           # displacement/imbalance ada -> OB kuat
+            "has_bos": True,              # lolos gerbang BOS (kalau tidak, sudah di-skip di atas)
             "mitigated": mitigated,
             "broken": broken,
             "status": "broken" if broken else ("mitigated" if mitigated else "fresh"),

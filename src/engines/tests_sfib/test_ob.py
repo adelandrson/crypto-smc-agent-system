@@ -137,3 +137,25 @@ def test_bases_broken_when_price_closes_back_through():
     zs = detect_bases(bars, atr)
     bulls = [z for z in zs if z["type"] == "bull"]
     assert bulls and bulls[-1]["status"] == "broken"
+
+
+def test_ob_requires_fvg():
+    # up-leg GRADUAL (overlap, tanpa FVG) -> require_fvg gugurkan OB; mekanisme candle tetap jalan
+    from sfib.ob import detect_order_blocks
+    rows = []
+    for i in range(20):
+        c = 100 - i
+        rows.append([c + 1, c + 1.5, c - 0.5, c])
+    bottom = 81
+    for i in range(1, 26):                        # naik gradual: low[i+2] == high[i] -> tanpa gap
+        c = bottom + i
+        rows.append([c - 0.5, c + 1, c - 1, c])
+    peak = bottom + 25
+    for i in range(1, 7):
+        c = peak - i
+        rows.append([c + 1, c + 1.5, c - 0.5, c])
+    bars = _bars(rows)
+    atr = compute_atr(bars, 14)
+    swings = significant_swings(bars, atr, 5, 0.5)
+    assert detect_order_blocks(bars, swings, require_fvg=True) == []
+    assert detect_order_blocks(bars, swings, require_fvg=False)

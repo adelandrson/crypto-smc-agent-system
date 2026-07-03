@@ -297,12 +297,10 @@ function _applyOverlays() {
   const st = d.structure || {};
   if (_ind.struct) { pl(st.last_swing_high, "rgba(239,83,80,.5)", "SwH"); pl(st.last_swing_low, "rgba(38,166,154,.5)", "SwL"); }
   if (_ind.liq) {
-    const lq = d.liquidity || {}, pools = lq.pools || {};
-    if (lq.bsl != null) pl(lq.bsl, "rgba(255,152,0,.55)", "BSL");   // buy-side liq (di atas)
-    if (lq.ssl != null) pl(lq.ssl, "rgba(255,152,0,.55)", "SSL");   // sell-side liq (di bawah)
-    (pools.eqh || []).forEach(p => pl(p, "#ff9800", "EQH", 0));
-    (pools.eql || []).forEach(p => pl(p, "#ff9800", "EQL", 0));
-    if (lq.sweep && lq.sweep.swept && lq.sweep.level != null) pl(lq.sweep.level, "#ff5252", "SWEEP", 0);
+    const lq = d.liquidity || {};
+    (lq.bsl || []).forEach(b => pl(b.level, b.eq ? "#ff9800" : "rgba(255,152,0,.5)", b.eq ? "EQH" : "BSL", b.eq ? 0 : 2));
+    (lq.ssl || []).forEach(s => pl(s.level, s.eq ? "#ff9800" : "rgba(255,152,0,.5)", s.eq ? "EQL" : "SSL", s.eq ? 0 : 2));
+    if (lq.sweep && lq.sweep.swept && lq.sweep.level != null) pl(lq.sweep.level, "#ff5252", `SWEEP ${lq.sweep.type || ""} ${lq.sweep.direction > 0 ? "↑" : "↓"}`, 0);
   }
   cs.setMarkers(_ind.struct ? (d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.provisional ? "circle" : (s.kind === "high" ? "arrowDown" : "arrowUp"), text: (s.kind === "high" ? "H" : "L") + (s.provisional ? "?" : "") })) : []);
   if (_lwVol) _lwVol.applyOptions({ visible: _ind.vol });
@@ -335,7 +333,7 @@ function _renderIndicatorPanel(d) {
   const conf = chip(`score ${sc > 0 ? "+" : ""}${sc ?? "?"}`, sc > 0 ? "pos" : sc < 0 ? "neg" : "") +
     chip(`zona ${esc(c.zone || "?")}`) + (c.high_confluence ? chip("A+ confluence", "pos") : "") +
     chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
-  const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
+  const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {};
   const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} ${f.zone === "discount" ? '<span class="pos">diskon</span>' : f.zone === "premium" ? '<span class="neg">premium</span>' : ""} <span class="muted">${esc(f.state || "")}</span>`);
   const obL = (d.order_blocks || []).filter(_obShow).map(o => `${o.akum ? (o.type === "bull" ? '<span style="color:#66a5f5">⌂ akumulasi</span>' : '<span style="color:#ff9800">⌂ distribusi</span>') : (o.type === "bull" ? '<span style="color:#66a5f5">↑ demand</span>' : '<span style="color:#ff9800">↓ supply</span>')} ${_cp(o.bottom)}–${_cp(o.top)}${o.flip ? ' <span style="color:#c792ea" title="OB demand & supply tumpang-tindih = key level kuat">⇄flip</span>' : ""} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
   const obSeg = `<span class="ob-seg">${[["all", "Semua"], ["demand", "↑demand"], ["supply", "↓supply"]].map(([f, t]) => `<button type="button" data-obf="${f}" class="${_obFilter === f ? "on" : ""}">${t}</button>`).join("")}</span>`;
@@ -352,11 +350,9 @@ function _renderIndicatorPanel(d) {
   const lastSw = (d.swings || []).slice(-1)[0], provKind = lastSw && lastSw.provisional ? lastSw.kind : null;
   const stL = [st.last_swing_high != null ? `SwH ${_cp(st.last_swing_high)}${provKind === "high" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.last_swing_low != null ? `SwL ${_cp(st.last_swing_low)}${provKind === "low" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.event ? esc(String(st.event).toUpperCase()) : null].filter(Boolean);
   const liqL = [];
-  if (lq.bsl != null) liqL.push(`BSL ${_cp(lq.bsl)}`);
-  if (lq.ssl != null) liqL.push(`SSL ${_cp(lq.ssl)}`);
-  (pools.eqh || []).forEach(p => liqL.push(`EQH ${_cp(p)}`));
-  (pools.eql || []).forEach(p => liqL.push(`EQL ${_cp(p)}`));
-  if (lq.sweep && lq.sweep.swept) liqL.push(`⚡ sweep ${esc(lq.sweep.type || "")} @ ${_cp(lq.sweep.level)}`);
+  (lq.bsl || []).forEach(b => liqL.push(`${b.eq ? '<b style="color:#ff9800">EQH</b>' : "BSL"} ${_cp(b.level)}`));
+  (lq.ssl || []).forEach(s => liqL.push(`${s.eq ? '<b style="color:#ff9800">EQL</b>' : "SSL"} ${_cp(s.level)}`));
+  if (lq.sweep && lq.sweep.swept) liqL.push(`<span style="color:#ff5252">⚡ sweep ${esc(lq.sweep.type || "")} ${lq.sweep.direction > 0 ? "→ bullish" : "→ bearish"} @ ${_cp(lq.sweep.level)}</span>`);
   const row = (key, color, name, items, note) => {
     const detail = (items && items.length) ? items.join(" · ") : (note || `<span class="muted">tak terdeteksi</span>`);
     return `<label class="ind-row"><input type="checkbox" data-ind="${key}"${_ind[key] ? " checked" : ""}><span class="ind-sw" style="background:${color}"></span><b class="ind-name">${name}</b><span class="ind-detail">${detail}</span></label>`;
