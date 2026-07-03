@@ -143,9 +143,15 @@ mengubah rentang skor.
 - Anti-*ranging* (vol_state), anti *volume anomaly* (volume di bawah rata-rata).
 - LSR kontrarian: crowd ekstrem melawan arah → veto.
 - **Gerbang funding**: bila posisi akan **MEMBAYAR** funding yang tinggi (adverse), entry ditolak —
-  ada dua ambang: **absolut** (> 0.1%/8j → tolak; mis. koin kecil dengan funding ekstrem) dan
-  **relatif** (estimasi biaya funding selama hold > 35% dari jarak profit ke TP1). Funding yang
-  **DITERIMA** (menguntungkan posisi) tak pernah memblokir.
+  ada dua ambang: **absolut** (> 0.1%/8j → tolak) dan **relatif** (estimasi biaya funding selama hold
+  > 35% dari jarak profit ke TP1). Funding yang **DITERIMA** (menguntungkan posisi) tak pernah memblokir.
+- **Lapis anti crime-pump/dump** (koin **tier A ke bawah**, mcap/volume rendah): pakai data **1D ~90
+  hari** untuk mendeteksi manipulasi — volume per-candle sebelumnya konsisten sangat kecil (baseline),
+  lalu **spike volume** mengangkat harga tinggi (pump artifisial). Aksi: **BLOKIR LONG** selama harga
+  masih di puncak pump; **SHORT hanya bila DISTRIBUSI SELESAI** — ada candle wick-rejection atas dengan
+  **volume manipulasi TERTINGGI** (tanda bandar sudah buang barang) + harga sudah turun dari puncak +
+  beberapa wick-rejection, dengan **target profit = harga PRA-PUMP** (retrace penuh; sisa volume =
+  retail FOMO di harga atas). *(Contoh nyata: MANTA — spike 102× baseline, pump +122%.)*
 
 **Entry FLEKSIBEL** — harga kini **sudah di zona** (FVG/OB/OTE) → **market**; belum → **limit** di
 retest zona (pending → terisi saat pullback / batal bila TTL habis atau harga kabur).
@@ -175,6 +181,8 @@ dan masuk ke PnL — supaya expectancy mencerminkan biaya nyata perp.
 - **Entry fleksibel** market/limit + siklus limit-order penuh (pending→fill→cancel).
 - **TP adaptif**: scalp 1×100%, swing 1–3 dinamis, level dari struktur pasar.
 - **Gerbang funding** untuk menghindari funding rate tinggi yang menggerus PnL.
+- **Deteksi crime-pump/dump** koin tier rendah (baseline volume kecil → spike): blokir long di puncak,
+  cari short saat distribusi selesai dengan target harga pra-pump.
 - **Simulasi realistis**: fee taker, slippage, **funding fee**, evolusi SL, manajemen intra-bar.
 - **Dashboard live** (refresh 1 dtk): harga terkini, **unrealized PnL**, harga TP eksplisit, margin
   $/% dari equity, notional (×leverage), funding rate & fee.
