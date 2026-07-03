@@ -82,7 +82,10 @@ function _pgInner(id) {
   if (t.page < 0) t.page = 0;
   const slice = t.rows.slice(t.page * t.per, t.page * t.per + t.per);
   const nav = pages > 1 ? `<div class="pager"><button class="ctab" onclick="pgGo('${id}',-1)"${t.page <= 0 ? " disabled" : ""}>‹ Sebelumnya</button><span class="muted">Hal ${t.page + 1}/${pages} · ${n} total</span><button class="ctab" onclick="pgGo('${id}',1)"${t.page >= pages - 1 ? " disabled" : ""}>Berikutnya ›</button></div>` : "";
-  return `<div class="dtable-wrap"><table class="dtable"><thead>${t.thead}</thead><tbody>${slice.map(t.rowFn).join("")}</tbody></table></div>${nav}`;
+  const inner = t.cardFn
+    ? `<div class="pos-cards">${slice.map(t.cardFn).join("")}</div>`
+    : `<div class="dtable-wrap"><table class="dtable"><thead>${t.thead}</thead><tbody>${slice.map(t.rowFn).join("")}</tbody></table></div>`;
+  return inner + nav;
 }
 function pgGo(id, d) {
   const t = _pgt[id]; if (!t) return;
@@ -96,6 +99,17 @@ function pagedTable(id, title, thead, rows, rowFn, opts) {
   const prev = _pgt[id];
   _pgt[id] = { rows, rowFn, page: prev ? prev.page : 0, per: opts.per || PG_PER, thead, open: prev ? prev.open : (opts.open !== false) };
   return `<details class="guide"${_pgt[id].open ? " open" : ""} style="margin-top:12px" ontoggle="pgToggle('${id}',this.open)"><summary>${title} (${rows.length})</summary><div class="guide-body"><div id="pgw-${id}">${_pgInner(id)}</div></div></details>`;
+}
+// paginasi KARTU. opts.collapsible=true -> bisa minimize/maximize (<details>); else selalu tampil.
+function pagedCards(id, title, items, cardFn, opts) {
+  opts = opts || {};
+  const prev = _pgt[id];
+  _pgt[id] = { rows: items, cardFn, page: prev ? prev.page : 0, per: opts.per || 5, open: prev ? prev.open : (opts.open !== false) };
+  const body = `<div id="pgw-${id}">${_pgInner(id)}</div>`;
+  if (opts.collapsible) {
+    return `<details class="guide"${_pgt[id].open ? " open" : ""} style="margin-top:12px" ontoggle="pgToggle('${id}',this.open)"><summary>${esc(title)} (${items.length})</summary><div class="guide-body">${body}</div></details>`;
+  }
+  return `<div class="ag-open-sec"><h3 class="ag-h">${esc(title)} (${items.length})</h3>${body}</div>`;
 }
 
 // ── modal konfirmasi (type-to-confirm) ─────────────────
@@ -332,9 +346,14 @@ async function loadAgent(silent) {
         <div class="ac-expectancy">Expectancy: <b>${s.expectancy_r != null ? (s.expectancy_r > 0 ? "+" : "") + s.expectancy_r + "R" : "belum cukup sampel"}</b> <span class="muted">— ukuran utama, bukan win-rate</span></div>
       </div>`).join("")}</div>`;
     let html = "";
-    if (d.pending && d.pending.length) html += `<h3 class="ag-h">LIMIT order menunggu (${d.pending.length})</h3>` + d.pending.map(_pendingCard).join("");
-    if (d.open && d.open.length) html += `<h3 class="ag-h">Posisi terbuka (${d.open.length})</h3>` + d.open.map(_posCard).join("");
-    else if (!(d.pending && d.pending.length)) html += `<p class="muted">Tidak ada posisi terbuka atau limit order menunggu.</p>`;
+    // LIMIT order menunggu — bisa minimize/maximize (collapsible), 5/halaman
+    if (d.pending && d.pending.length) html += pagedCards("pending", "LIMIT order menunggu", d.pending, _pendingCard, { per: 5, collapsible: true, open: true });
+    // Posisi terbuka — DIPISAH scalp/swing, SELALU tampil (tak collapsible), 5/halaman
+    const openS = (d.open || []).filter(p => p.group === "scalp");
+    const openW = (d.open || []).filter(p => p.group === "swing");
+    if (openS.length) html += pagedCards("openS", "Posisi terbuka · Scalp", openS, _posCard, { per: 5 });
+    if (openW.length) html += pagedCards("openW", "Posisi terbuka · Swing", openW, _posCard, { per: 5 });
+    if (!openS.length && !openW.length && !(d.pending && d.pending.length)) html += `<p class="muted">Tidak ada posisi terbuka atau limit order menunggu.</p>`;
     if (d.closed && d.closed.length) {
       const _hold = (a, b) => { if (!a || !b) return "—"; const h = (new Date(b) - new Date(a)) / 3.6e6; return h < 24 ? h.toFixed(1) + " jam" : (h / 24).toFixed(1) + " hari"; };
       const thead = `<tr><th>Koin</th><th>Arah</th><th class="r">Entry</th><th class="r">Exit (di mana)</th><th class="r">PnL</th><th class="r">R</th><th>Hasil</th><th class="r">Funding</th><th>Durasi</th></tr>`;
@@ -355,7 +374,7 @@ async function loadAgent(silent) {
           <td class="muted">${_hold(r.entry_ts, r.closed_at)}</td></tr>
         <tr class="ct-det"><td colspan="9"><span class="muted">SL awal ${fmtPrice(r.sl)} · rincian fill: ${fillsStr} · funding ${(r.funding_paid_usd || 0) >= 0 ? "+" : ""}$${(r.funding_paid_usd || 0).toFixed(4)} · ditutup ${r.closed_at ? new Date(r.closed_at).toLocaleString() : ""}</span></td></tr>`;
       };
-      html += pagedTable("closed", "Riwayat tertutup (detail simulasi & evaluasi)", thead, d.closed, rowFn);
+      html += pagedTable("closed", "Riwayat tertutup (detail simulasi & evaluasi)", thead, d.closed, rowFn, { per: 10 });
     }
     out.innerHTML = html;
   } catch (e) {

@@ -329,3 +329,7 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 /* baris detail riwayat tertutup */
 .ct-det td { padding-top: 0 !important; padding-bottom: 8px !important; border-top: none !important; font-size: 11px; }
 .ct-sum td { border-bottom: none !important; }
+
+/* grid kartu posisi (Agent) — kompak, responsif */
+.pos-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.ag-open-sec { margin-top: 14px; }
