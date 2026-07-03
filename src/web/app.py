@@ -91,31 +91,87 @@ def analyze_api(symbol: str):
     }
 
 
+_NARR_TFS = ("1d", "4h", "1h", "15m")   # top-down: bias makro -> struktur -> timing entri
+
+
+def _tf_summary(sym: str) -> list:
+    """Ringkasan analisa PER-TIMEFRAME (top-down 1D->15m) utk data pendukung MTF ke LLM."""
+    from src.smc.market import FallbackAdapter
+    from src.smc.confluence import fib_preset, sfib, analyze_confluence
+    from src.engines.fvg import engine as fvgeng
+    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True}
+    cli = FallbackAdapter()
+    rows = []
+    for tf in _NARR_TFS:
+        try:
+            raw = cli.fetch_ohlcv(f"{sym}/USDT", tf, 220, "perp")
+            if not raw or len(raw) < 60:
+                rows.append({"tf": tf, "error": "data kurang"})
+                continue
+            bars = [{"open": k[1], "high": k[2], "low": k[3], "close": k[4], "volume": k[5], "time": k[0]} for k in raw]
+            px = raw[-1][4]
+            conf = analyze_confluence(raw, fvg_config=cfg, fib_config=fib_preset(tf))
+            sf = sfib.analyze(bars, fib_preset(tf))
+            fib = (sf.get("active_leg") or {}).get("fib") or {}
+            st = sf.get("structure") or {}
+            sweep = sf.get("liquidity_sweep") or {}
+            fv = fvgeng.analyze(bars, cfg)
+            act = [f for f in (fv.get("fvgs") or []) if f.get("is_active")]
+            near = lambda z: 0.0 if z["bottom"] <= px <= z["top"] else min(abs(px - z["top"]), abs(px - z["bottom"]))
+            act.sort(key=near)
+            nf = act[0] if act else None
+            rows.append({
+                "tf": tf, "price": round(px, 6), "trend": st.get("trend"),
+                "score_teknikal": conf.get("analysis_score"), "zona": conf.get("zone"),
+                "fvg_bias": conf.get("fvg_bias"), "fib": fib.get("direction"),
+                "golden_pocket": [round(g, 6) for g in (fib.get("golden_pocket") or [])],
+                "di_OTE": conf.get("in_ote"), "di_GP": conf.get("in_golden_pocket"),
+                "swing_high": st.get("last_swing_high"), "swing_low": st.get("last_swing_low"),
+                "struktur_event": st.get("event"), "arah_event": st.get("event_direction"),
+                "fvg_terdekat": ({"bawah": round(nf["bottom"], 6), "atas": round(nf["top"], 6), "arah": nf["direction"]} if nf else None),
+                "sweep": (sweep if sweep.get("swept") else None),
+                "rsi": conf.get("rsi"), "vol_state": conf.get("vol_state"),
+            })
+        except Exception as e:  # noqa: BLE001
+            rows.append({"tf": tf, "error": type(e).__name__})
+    return rows
+
+
 @app.get("/api/narrative/{symbol}")
 def narrative_api(symbol: str, tf: str = "1h"):
-    """Narasi analisa + KESIMPULAN dari agent (Vega) + LLM, berbasis DATA engine (deterministik).
-    Fallback ringkas bila LLM tak tersedia."""
+    """Analisa MULTI-TIMEFRAME (top-down 1D->4h->1h->15m) + sentimen derivatif + sinyal agent, disintesa
+    agent Vega + LLM jadi analisa lengkap + rencana. Fallback bila LLM tak tersedia."""
     import json as _j
     from src.llm import skills
     sym = symbol.strip().upper()
     data = {
-        "fvg": skills.fvg_analyze(sym, tf), "structure": skills.structure_analyze(sym, tf),
-        "momentum": skills.momentum_analyze(sym, tf), "sentiment": skills.sentiment_analyze(sym),
-        "scalp": skills.confluence_signal(sym, "scalp"), "swing": skills.confluence_signal(sym, "swing"),
+        "multi_timeframe": _tf_summary(sym),                    # 1D->15m (top-down)
+        "sentimen_derivatif": skills.sentiment_analyze(sym),    # OI + FR + LSR (market-wide)
+        "sinyal_agent_scalp": skills.confluence_signal(sym, "scalp"),
+        "sinyal_agent_swing": skills.confluence_signal(sym, "swing"),
     }
     prompt = (
-        f"Kamu Vega, analis TEKNIKAL murni. Dari DATA engine berikut untuk {sym} (TF {tf}), tulis analisa "
-        f"RINGKAS & mudah dibaca trader dalam Bahasa Indonesia. Struktur: **1. Struktur & tren**, "
-        f"**2. Zona penting** (FVG/Fibonacci/Order Block + premium/discount), **3. Momentum & sentimen** "
-        f"(RSI/vol_state/OI/FR/LSR), **4. KESIMPULAN**: bias (LONG/SHORT/NETRAL), level kunci, dan apakah "
-        f"ada setup (|score|≥2) atau NO-TRADE + alasannya. Maksimal ~180 kata, boleh poin. JANGAN mengarang "
-        f"angka di luar data.\n\nDATA:\n{_j.dumps(data, ensure_ascii=False)[:3500]}")
+        f"Kamu Vega, analis TEKNIKAL murni (Smart Money / price action) untuk {sym}. Kamu diberi data "
+        f"MULTI-TIMEFRAME (1D->4h->1h->15m) + sentimen derivatif + sinyal gerbang agent. Tulis analisa "
+        f"LENGKAP & terstruktur dalam Bahasa Indonesia dgn pendekatan TOP-DOWN (HTF ke LTF). Bagian:\n"
+        f"**1. Bias HTF (1D & 4h)** — tren dominan, struktur (BOS/CHoCH), zona premium/discount besar.\n"
+        f"**2. Struktur menengah (1h)** — apakah selaras/berlawanan dgn HTF, POI (FVG/OB/Fib) penting.\n"
+        f"**3. Timing entri (15m)** — kondisi LTF, konfirmasi/sweep, kapan valid entri.\n"
+        f"**4. Keselarasan Multi-Timeframe** — TF mana searah/konflik; ini menentukan keyakinan.\n"
+        f"**5. Momentum & Sentimen** — RSI & vol_state per TF + OI/FR/LSR (funding ekstrem? crowd?).\n"
+        f"**6. KESIMPULAN & RENCANA** — bias akhir (LONG/SHORT/NETRAL); jika ada setup: area ENTRY, "
+        f"STOP-LOSS (invalidasi struktur), TARGET (level Fib/likuiditas), dan gaya (scalp/swing); jika "
+        f"tidak: NO-TRADE + syarat yg ditunggu. Sebut tingkat keyakinan (rendah/menengah/tinggi).\n\n"
+        f"Aturan: HANYA pakai angka dari DATA (jangan mengarang). Kalau TF konflik, katakan jujur & "
+        f"utamakan bias HTF. Ringkas tapi menyeluruh (boleh 300-450 kata, pakai poin bila perlu).\n\n"
+        f"DATA:\n{_j.dumps(data, ensure_ascii=False)[:6000]}")
     try:
         from src.llm import client as llm
-        txt = llm.orchestrator(timeout=60).chat([{"role": "user", "content": prompt}],
-                                                max_tokens=650, temperature=0.4)
+        txt = llm.orchestrator(timeout=90).chat([{"role": "user", "content": prompt}],
+                                                max_tokens=1400, temperature=0.4)
         if txt and txt.strip():
-            return {"ok": True, "by": "Vega + LLM", "narrative": txt.strip()}
+            return {"ok": True, "by": "Vega + LLM · multi-timeframe", "narrative": txt.strip(),
+                    "mtf": data["multi_timeframe"]}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "LLM tak tersedia", "detail": str(e)[:120]}
     return {"ok": False, "error": "LLM tak memberi jawaban"}

@@ -389,7 +389,7 @@ async function analyze(symbol) {
       <div><span>LSR score</span><b>${(d.sentiment || {}).lsr_score ?? "—"}</b></div>
     </div>`;
     html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${_confluenceSection("Scalp (5m)", d.scalp)}${_confluenceSection("Swing (4h)", d.swing)}</div>`;
-    html += `<div id="narrativeBox" class="narrative"><div class="narr-head"><span class="narr-av">◈</span> <b>Analisa &amp; kesimpulan</b> <span class="muted">— Vega + LLM</span></div>
+    html += `<div id="narrativeBox" class="narrative"><div class="narr-head"><span class="narr-av">◈</span> <b>Analisa &amp; kesimpulan</b> <span class="muted">— Vega + LLM · multi-timeframe</span></div>
       <div id="narrativeBody" class="narr-body"><div class="loading"><div class="spinner"></div> agent menyusun analisa…</div></div></div>`;
     out.innerHTML = html;
     _loadNarrative(sym, _chartTf);      // narasi + kesimpulan agent (async, tak blok chart)
@@ -397,13 +397,29 @@ async function analyze(symbol) {
     out.innerHTML = `<p class="muted">gagal memuat analisa: ${esc(String(e))}</p>`;
   }
 }
+function _mtfTable(mtf) {
+  if (!mtf || !mtf.length) return "";
+  const trCls = t => t === "uptrend" ? "pos" : t === "downtrend" ? "neg" : "";
+  const row = r => r.error
+    ? `<tr><td><b>${esc(r.tf)}</b></td><td colspan="5" class="muted">${esc(r.error)}</td></tr>`
+    : `<tr><td><b>${esc(r.tf)}</b></td>
+        <td><b class="${trCls(r.trend)}">${esc(r.trend || "?")}</b></td>
+        <td class="r"><b class="${r.score_teknikal > 0 ? "pos" : r.score_teknikal < 0 ? "neg" : ""}">${r.score_teknikal > 0 ? "+" : ""}${r.score_teknikal ?? "?"}</b></td>
+        <td>${esc(r.zona || "?")}</td>
+        <td>${esc(r.fib || "?")}${r.di_GP ? ' <span class="pos">·GP</span>' : r.di_OTE ? ' <span class="pos">·OTE</span>' : ""}</td>
+        <td class="r">${r.rsi ?? "—"} <span class="muted">${esc(r.vol_state || "")}</span></td></tr>`;
+  return `<div class="mtf-head muted">Data multi-timeframe (top-down):</div>
+    <div class="dtable-wrap" style="margin:4px 0 12px"><table class="dtable"><thead>
+    <tr><th>TF</th><th>Tren</th><th class="r">Skor</th><th>Zona</th><th>Fib</th><th class="r">RSI/vol</th></tr>
+    </thead><tbody>${mtf.map(row).join("")}</tbody></table></div>`;
+}
 async function _loadNarrative(sym, tf) {
   const body = document.getElementById("narrativeBody");
   if (!body) return;
   try {
     const d = await (await fetch(`/api/narrative/${encodeURIComponent(sym)}?tf=${tf}`)).json();
-    if (d.ok && d.narrative) body.innerHTML = md(d.narrative);
-    else body.innerHTML = `<p class="muted">Narasi LLM tak tersedia saat ini (${esc(d.error || "—")}). Confluence numerik di atas tetap valid.</p>`;
+    if (d.ok && d.narrative) body.innerHTML = _mtfTable(d.mtf) + md(d.narrative);
+    else body.innerHTML = _mtfTable(d.mtf) + `<p class="muted">Narasi LLM tak tersedia saat ini (${esc(d.error || "—")}). Data MTF & confluence di atas tetap valid.</p>`;
   } catch (e) {
     body.innerHTML = `<p class="muted">gagal memuat narasi: ${esc(String(e))}</p>`;
   }
