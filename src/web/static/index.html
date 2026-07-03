@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>crypto-smc · sistem pembanding SMC/FVG</title>
-  <link rel="stylesheet" href="/static/style.css?v=8">
+  <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
 <body>
   <div class="layout">
@@ -34,8 +34,9 @@
             <input id="symInput" placeholder="Ketik simbol koin — mis. BTC, ETH, SOL…" autocomplete="off" spellcheck="false">
             <button type="submit" id="goBtn">Analisa</button>
           </form>
+          <div id="symSuggest" class="suggest"></div>
         </div>
-        <p class="hint">Metodologi <b>Smart Money Concepts</b>: FVG + Fibonacci/Order Block/struktur, dikombinasi OI+FR+LSR jadi confluence score −4..+4. Trade hanya jika |score|≥2 & lolos semua filter.</p>
+        <p class="hint"><b>Analisa teknikal murni</b>: Fair Value Gap + Fibonacci/Order Block/struktur (BOS-CHoCH) + momentum (RSI/ADX/volume), dikombinasi dengan Open Interest + Funding Rate + Long/Short Ratio menjadi confluence score −4..+4. Trade hanya jika |score| ≥ 2 & lolos semua filter.</p>
         <div id="analyzeOut"></div>
       </section>
 
@@ -96,6 +97,6 @@
     </form>
   </div>
 
-  <script src="/static/app.js?v=8"></script>
+  <script src="/static/app.js?v=9"></script>
 </body>
 </html>

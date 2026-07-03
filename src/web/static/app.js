@@ -171,7 +171,35 @@ function zoneChip(z) { return z ? `<span class="zone-chip ${esc(z)}">${esc(z)}</
 
 // ── Analisa ───────────────────────────────────────────
 let _activeSym = null;
-document.getElementById("searchForm").onsubmit = e => { e.preventDefault(); analyze(document.getElementById("symInput").value.trim()); };
+document.getElementById("searchForm").onsubmit = e => { e.preventDefault(); document.getElementById("symSuggest").classList.remove("show"); analyze(document.getElementById("symInput").value.trim()); };
+
+// ── suggest/autocomplete simbol (Analisa) — dari universe ──
+let _symList = [];
+async function _loadSymList() {
+  if (_symList.length) return _symList;
+  try { const d = await (await fetch("/api/universe")).json(); _symList = (d.tokens || []).map(t => ({ symbol: t.symbol, name: t.name || "" })); } catch { /* offline */ }
+  return _symList;
+}
+function _renderSuggest(q) {
+  const box = document.getElementById("symSuggest");
+  q = (q || "").trim().toUpperCase();
+  const m = q ? _symList.filter(t => t.symbol.includes(q) || t.name.toUpperCase().includes(q)).slice(0, 8) : [];
+  if (!m.length) { box.innerHTML = ""; box.classList.remove("show"); return; }
+  box.innerHTML = m.map(t => `<div class="sug-item" data-sym="${esc(t.symbol)}"><b>${esc(t.symbol)}</b> <span class="muted">${esc(t.name)}</span></div>`).join("");
+  box.classList.add("show");
+  box.querySelectorAll(".sug-item").forEach(el => el.onmousedown = ev => {
+    ev.preventDefault(); const s = el.dataset.sym;
+    document.getElementById("symInput").value = s; box.classList.remove("show"); analyze(s);
+  });
+}
+(function initSuggest() {
+  const inp = document.getElementById("symInput"); if (!inp) return;
+  _loadSymList();
+  inp.addEventListener("input", () => _renderSuggest(inp.value));
+  inp.addEventListener("focus", () => { _loadSymList(); _renderSuggest(inp.value); });
+  inp.addEventListener("blur", () => setTimeout(() => document.getElementById("symSuggest").classList.remove("show"), 150));
+  inp.addEventListener("keydown", ev => { if (ev.key === "Escape") document.getElementById("symSuggest").classList.remove("show"); });
+})();
 
 function _confluenceSection(title, d) {
   if (!d || d.error) return `<div class="confluence-card"><h4>${title}</h4><p class="muted">${d && d.error ? esc(d.error) : "tak ada data"}</p></div>`;
@@ -285,7 +313,7 @@ function _tpLadder(tps, fills) {
 function _posCard(p) {
   const pnlCls = (p.realized_pnl_usd || 0) >= 0 ? "pos" : "neg";
   return `<div class="pos-card">
-    <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${legTag(p.leg)} · ${p.leverage}x</span></span>
+    <div class="pos-head"><span class="pos-sym">${legTag(p.leg)} - ${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${p.leverage}x</span></span>
       <b class="${pnlCls}">${p.realized_pnl_usd >= 0 ? "+" : ""}$${(p.realized_pnl_usd || 0).toFixed(2)}${p.r_multiple != null ? ` (${p.r_multiple > 0 ? "+" : ""}${p.r_multiple}R)` : ""}</b></div>
     <div class="ac-grid"><div><span>Entry</span><b>${fmtPrice(p.entry)}</b></div><div><span>SL</span><b>${fmtPrice(p.sl)}</b></div>
       <div><span>Qty sisa</span><b>${fmtQty(p.qty_remaining)} / ${fmtQty(p.original_qty)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
@@ -315,7 +343,7 @@ function _tpPrices(p) {
 function _pendingCard(p) {
   const dir = legTag(p.leg);
   return `<div class="pos-card pending">
-    <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${dir} · ${p.leverage}x</span></span>
+    <div class="pos-head"><span class="pos-sym">${dir} - ${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${p.leverage}x</span></span>
       <span class="pending-badge">◷ LIMIT menunggu</span></div>
     <div class="ac-grid"><div><span>Limit</span><b>${fmtPrice(p.entry)}</b></div>
       <div><span>Harga terkini</span><b>${p.current_price != null ? fmtPrice(p.current_price) : (p.mark_price != null ? fmtPrice(p.mark_price) : "—")}${p.current_price != null && p.entry ? ` <span class="muted" style="font-size:11px">(${(Math.abs(p.current_price - p.entry) / p.entry * 100).toFixed(2)}% ke limit)</span>` : ""}</b></div>
@@ -358,15 +386,15 @@ async function loadAgent(silent) {
     if (!openS.length && !openW.length && !(d.pending && d.pending.length)) html += `<p class="muted">Tidak ada posisi terbuka atau limit order menunggu.</p>`;
     if (d.closed && d.closed.length) {
       const _hold = (a, b) => { if (!a || !b) return "—"; const h = (new Date(b) - new Date(a)) / 3.6e6; return h < 24 ? h.toFixed(1) + " jam" : (h / 24).toFixed(1) + " hari"; };
-      const thead = `<tr><th>Koin</th><th>Arah</th><th class="r">Entry</th><th class="r">Exit (di mana)</th><th class="r">PnL</th><th class="r">R</th><th>Hasil</th><th class="r">Funding</th><th>Durasi</th></tr>`;
+      const thead = `<tr><th>Koin</th><th>Lev</th><th class="r">Entry</th><th class="r">Exit (di mana)</th><th class="r">PnL</th><th class="r">R</th><th>Hasil</th><th class="r">Funding</th><th>Durasi</th></tr>`;
       const rowFn = r => {
         const fills = r.fills || [], last = fills[fills.length - 1];
         const exitStr = last ? `${esc(last.label)} @ ${fmtPrice(last.price)}` : "—";
         const ocBadge = r.outcome === "tp_full" ? '<span class="pos">TP</span>' : r.outcome === "sl" ? '<span class="neg">SL</span>' : `<span class="muted">${esc(r.outcome || "—")}</span>`;
         const fillsStr = fills.length ? fills.map(f => `${esc(f.label)} ${r.original_qty ? (f.qty / r.original_qty * 100).toFixed(0) + "%" : ""} @ ${fmtPrice(f.price)} (${f.pnl_usd >= 0 ? "+" : ""}$${(f.pnl_usd || 0).toFixed(2)})`).join(" · ") : "—";
         return `<tr class="ct-sum">
-          <td><b>${esc(r.symbol)}</b> <span class="muted">${esc(r.group)}</span></td>
-          <td>${legTag(r.leg)} <span class="muted">${r.leverage}x</span></td>
+          <td>${legTag(r.leg)} - <b>${esc(r.symbol)}</b> <span class="muted">${esc(r.group)}</span></td>
+          <td class="muted">${r.leverage}x</td>
           <td class="r">${fmtPrice(r.entry)}</td>
           <td class="r">${exitStr}</td>
           <td class="r ${(r.realized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">${(r.realized_pnl_usd || 0) >= 0 ? "+" : ""}$${(r.realized_pnl_usd || 0).toFixed(2)}</td>

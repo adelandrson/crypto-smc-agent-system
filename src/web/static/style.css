@@ -333,3 +333,13 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 /* grid kartu posisi (Agent) — kompak, responsif */
 .pos-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
 .ag-open-sec { margin-top: 14px; }
+
+/* autocomplete/suggest simbol di halaman Analisa */
+.search-wrap { position: relative; }
+.suggest { position: absolute; top: 100%; left: 0; right: 0; z-index: 40; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden auto;
+  box-shadow: var(--shadow); display: none; max-height: 320px; }
+.suggest.show { display: block; }
+.sug-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border); }
+.sug-item:last-child { border-bottom: none; }
+.sug-item:hover { background: var(--bg); }
