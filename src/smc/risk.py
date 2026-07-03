@@ -107,7 +107,7 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, spike_mult:
     DISTRIBUSI FINAL (syarat SHORT): (1) harga SIDEWAYS di atas (high berkelompok + >=2 wick-reject
     atas); (2) volume sideways relatif sejajar dgn LOCAL-peak volume di tengah (lebih tinggi dari
     tetangga kiri&kanan, BUKAN global-max) pada candle wick-reject. Bila terpenuhi & masih ada room:
-    SHORT SL = wick TERTINGGI pump, TP 100% = ~<=tp_margin di atas pra-pump. Return: is_pump/block_long/
+    SHORT SL = wick tertinggi saat SIDEWAYS (local), TP 100% = ~<=tp_margin di atas pra-pump. Return: is_pump/block_long/
     short_ok/pre_pump_price/peak_price/short_sl/short_tp/pump_pct/reason."""
     out = {"is_pump": False, "block_long": False, "short_ok": False, "pre_pump_price": None,
            "peak_price": None, "short_sl": None, "short_tp": None, "pump_pct": None, "reason": ""}
@@ -135,7 +135,7 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, spike_mult:
     pre = _med(cl[max(0, s0 - 5):s0] or [cl[0]])
     if pre <= 0:
         return out
-    peak = max(h[s0:])                                       # wick tertinggi pump = SL short
+    peak = max(h[s0:])                                       # puncak pump (info; SL short pakai local sideways wick)
     pump_pct = (peak - pre) / pre
     if pump_pct < pump_min:
         return out
@@ -169,10 +169,10 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, spike_mult:
     room = cur > pre * (1 + min_room) and cur < peak * 0.98
     out["short_ok"] = bool(sideways and rejections >= 2 and local_peak and room)
     if out["short_ok"]:
-        out["short_sl"] = peak
+        out["short_sl"] = max(wh)                           # SL = wick TERTINGGI saat SIDEWAYS (local, bukan puncak pump)
         out["short_tp"] = pre * (1 + tp_margin)
         out["reason"] += (f"; DISTRIBUSI FINAL 1h (sideways-top + local-peak-vol wick-reject) → SHORT "
-                          f"SL {peak:.6g} / TP {out['short_tp']:.6g}")
+                          f"SL {out['short_sl']:.6g} (local wick) / TP {out['short_tp']:.6g}")
     return out
 
 

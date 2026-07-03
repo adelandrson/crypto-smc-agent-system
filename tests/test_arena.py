@@ -291,7 +291,7 @@ def test_pump_guard_blocks_long_gates_short():
     assert pump_guard(C, "S")["is_pump"] is False                        # major -> lewati
     v = pump_guard(C, "B")
     assert v["is_pump"] and v["block_long"] and v["short_ok"]
-    assert abs(v["short_sl"] - 15.0) < 0.01 and abs(v["short_tp"] - 10.1) < 0.05
+    assert abs(v["short_sl"] - 14.9) < 0.01 and abs(v["short_tp"] - 10.1) < 0.05   # SL = local sideways wick
     # volume sideways SAMA (tak ada local-peak) -> distribusi belum final
     for i in range(31, len(C)):
         C[i][5] = 650.0
