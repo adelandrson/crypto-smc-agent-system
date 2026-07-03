@@ -162,6 +162,17 @@ def chart_api(symbol: str, tf: str = "1h"):
     for f in (fv.get("fvgs") or []):
         if not f.get("is_active"):              # HANYA FVG hidup (bukan filled/invalidated = zona mati)
             continue
+        i = f.get("formed_index")               # RULE: candle TENGAH (i-1) wajib impulsif & searah
+        if isinstance(i, int) and 2 <= i < len(raw):
+            c1, c2, c3 = raw[i - 2], raw[i - 1], raw[i]
+            b1, b2, b3 = abs(c1[4] - c1[1]), abs(c2[4] - c2[1]), abs(c3[4] - c3[1])
+            rng2, bull = c2[2] - c2[3], f.get("direction") == "bullish"
+            if b2 < max(b1, b3):                # candle tengah bukan penggerak terbesar -> bukan FVG sah
+                continue
+            if rng2 > 0 and b2 < 0.45 * rng2:   # mayoritas wick, bukan impuls bersih
+                continue
+            if (bull and c2[4] < c2[1]) or ((not bull) and c2[4] > c2[1]):  # arah displacement salah
+                continue
         fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
                      "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
     obs = []
@@ -170,6 +181,18 @@ def chart_api(symbol: str, tf: str = "1h"):
         t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
         obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"),
                     "status": ob.get("status"), "from": t})
+    obs.sort(key=lambda o: (o["type"], o["bottom"]))     # GABUNG OB setipe yg tumpang-tindih -> 1 zona
+    mo = []
+    for o in obs:
+        m = mo[-1] if mo else None
+        if m and m["type"] == o["type"] and o["bottom"] <= m["top"]:
+            m["top"], m["bottom"] = max(m["top"], o["top"]), min(m["bottom"], o["bottom"])
+            m["from"] = min(m["from"], o["from"])
+            if o.get("status") != "mitigated":
+                m["status"] = o["status"]
+        else:
+            mo.append(dict(o))
+    obs = mo
     swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"],
                "provisional": bool(s.get("provisional"))}
               for s in (sf.get("swings") or []) if s.get("time")]
@@ -197,6 +220,10 @@ def chart_api(symbol: str, tf: str = "1h"):
     ssl = lows_below[0] if lows_below else None       # sell-side liquidity terdekat (stops di bawah low)
     fib = (sf.get("active_leg") or {}).get("fib") or {}
     struct = sf.get("structure") or {}
+    eq = fib.get("equilibrium")             # COMBO FVG×Fib: FVG di bawah 0.5 = zona DISKON (BUY win-rate tinggi)
+    if eq is not None:
+        for z in fvgs:
+            z["zone"] = "discount" if (z["top"] + z["bottom"]) / 2 < eq else "premium"
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,

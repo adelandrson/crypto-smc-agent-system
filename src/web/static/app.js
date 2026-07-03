@@ -331,9 +331,11 @@ function _renderIndicatorPanel(d) {
     chip(`zona ${esc(c.zone || "?")}`) + (c.high_confluence ? chip("A+ confluence", "pos") : "") +
     chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
   const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
-  const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} <span class="muted">${esc(f.state || "")}</span>`);
+  const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} ${f.zone === "discount" ? '<span class="pos">diskon</span>' : f.zone === "premium" ? '<span class="neg">premium</span>' : ""} <span class="muted">${esc(f.state || "")}</span>`);
   const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
   const fibL = [];
+  const _tr = (d.structure || {}).trend;
+  fibL.push(_tr === "range" ? '<span class="neg">⚠ sideways — fib kurang andal</span>' : `tren <b>${esc(_tr || "?")}</b>`);
   if (fib.golden_pocket) fibL.push(`GP ${_cp(Math.min(...fib.golden_pocket))}–${_cp(Math.max(...fib.golden_pocket))}`);
   if (fib.ote) fibL.push(`OTE ${_cp(Math.min(...fib.ote))}–${_cp(Math.max(...fib.ote))}`);
   if (fib.equilibrium != null) fibL.push(`EQ ${_cp(fib.equilibrium)}`);

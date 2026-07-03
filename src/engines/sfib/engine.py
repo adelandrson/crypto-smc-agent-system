@@ -61,6 +61,31 @@ def _alt_legs(swings, atr, price, max_alts=2):
     return out
 
 
+def _select_fib_leg(swings, trend):
+    """Anchor Fibonacci on the last IMPULSE leg IN THE TREND DIRECTION (rule: identify trend first,
+    then draw Low->High in an uptrend / High->Low in a downtrend). Walk from the newest swing to the
+    last completed trend-direction leg so the levels span the real move being retraced — not a micro
+    pullback (fixes 'Fib tiny/useless'). Range/unclear -> widest recent leg so it still isn't tiny."""
+    if len(swings) < 2:
+        return swings[-1], swings[-1]
+    if trend in ("uptrend", "downtrend"):      # clear trend -> last leg IN trend direction
+        end_kind = "low" if trend == "downtrend" else "high"
+        for i in range(len(swings) - 1, 0, -1):
+            if swings[i].kind == end_kind:
+                for j in range(i - 1, -1, -1):     # the opposite pivot that started this leg
+                    if swings[j].kind != end_kind:
+                        return swings[j], swings[i]
+                break
+    # range / no clean leg -> widest recent swing (dominant move), direction by recency
+    recent = swings[-8:]
+    highs = [p for p in recent if p.kind == "high"]
+    lows = [p for p in recent if p.kind == "low"]
+    if not highs or not lows:
+        return swings[-2], swings[-1]
+    H, L = max(highs, key=lambda p: p.price), min(lows, key=lambda p: p.price)
+    return (L, H) if H.index >= L.index else (H, L)
+
+
 def analyze(bars_input, config: Optional[dict] = None) -> dict:
     cfg = _cfg(config)
     bars = normalize_bars(bars_input)
@@ -75,9 +100,10 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
         return {"ok": False, "error": "no significant swing leg found",
                 "config": cfg, "swing_count": len(swings)}
 
-    O, E = swings[-2].price, swings[-1].price
-    fib = fib_for_leg(O, E, price)
     struct = classify(swings, price)
+    O_piv, E_piv = _select_fib_leg(swings, struct.get("trend"))
+    O, E = O_piv.price, E_piv.price
+    fib = fib_for_leg(O, E, price)
     order_blocks = detect_order_blocks(bars, swings)
 
     # Fib bias leg for confluence: price in OTE aligned with the active leg
@@ -114,10 +140,10 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
         "liquidity_pools": liquidity_pools,   # {eqh:[...], eql:[...]} — target TP struktur
         "fib_extensions": fib_extensions,     # level proyeksi Fib (target TP)
         "active_leg": {
-            "origin_index": swings[-2].index,
-            "origin_time": swings[-2].time,
-            "extreme_index": swings[-1].index,
-            "extreme_time": swings[-1].time,
+            "origin_index": O_piv.index,
+            "origin_time": O_piv.time,
+            "extreme_index": E_piv.index,
+            "extreme_time": E_piv.time,
             "fib": fib,
         },
         "fib_score": fib_score,         # +1/-1/0 for the confluence model

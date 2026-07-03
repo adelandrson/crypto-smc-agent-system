@@ -28,10 +28,10 @@ def test_engine_analyze():
     res = analyze(fixtures.BARS, {"depth": fixtures.DEPTH})
     assert res["ok"] is True
     leg = res["active_leg"]
-    # active leg now tracks the DEVELOPING extreme (provisional current-leg swing @26), not the
-    # stale confirmed up-leg (18->24) — the live leg is the pullback 128.1 -> 121.9 (down).
-    assert leg["origin_index"] == 24 and leg["extreme_index"] == 26
-    assert res["active_leg"]["fib"]["direction"] == "down"
+    # Fib anchors on the last IMPULSE leg in the trend direction: uptrend -> last Low->High (18->24).
+    # The developing pullback low @26 is (correctly) excluded from the trend Fib leg.
+    assert leg["origin_index"] == 18 and leg["extreme_index"] == 24
+    assert res["active_leg"]["fib"]["direction"] == "up"
     assert res["structure"]["trend"] == "uptrend"
     assert res["fib_score"] in (-1, 0, 1)
     assert res["zone"] in ("premium", "discount", "equilibrium")
