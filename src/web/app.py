@@ -182,6 +182,8 @@ def chart_api(symbol: str, tf: str = "1h"):
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction")},
+        "liquidity": {"sweep": sf.get("liquidity_sweep"), "pools": sf.get("liquidity_pools")},
+        "fib_extensions": sf.get("fib_extensions"),
         "structure": {"trend": struct.get("trend"), "event": struct.get("event"),
                       "event_direction": struct.get("event_direction"),
                       "last_swing_high": struct.get("last_swing_high"),

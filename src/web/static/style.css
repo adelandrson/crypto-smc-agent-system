@@ -365,3 +365,16 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 .narr-av { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; }
 .narr-body { padding: 12px 16px; font-size: 13.5px; line-height: 1.6; }
 .narr-body p { margin: 0 0 8px; } .narr-body ul { margin: 4px 0 8px 18px; } .narr-body h1,.narr-body h2,.narr-body h3 { font-size: 14px; margin: 10px 0 4px; }
+
+/* panel indikator (saklar + detail area harga) */
+.chart-legend { display: block; margin-top: 8px; }
+.cl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ind-list { display: grid; gap: 2px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.ind-row { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; font-size: 12.5px; }
+.ind-row:nth-child(odd) { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.ind-row:hover { background: var(--bg); }
+.ind-row input { accent-color: var(--accent); cursor: pointer; }
+.ind-sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.ind-name { flex: none; min-width: 168px; }
+.ind-detail { color: var(--text); font-variant-numeric: tabular-nums; overflow-x: auto; white-space: nowrap; }
+@media (max-width: 620px) { .ind-name { min-width: 0; } .ind-row { flex-wrap: wrap; } }

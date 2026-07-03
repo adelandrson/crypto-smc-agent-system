@@ -225,12 +225,17 @@ function _confluenceSection(title, d) {
   return body;
 }
 
-// ── CHART VISUAL (lightweight-charts): candle + FVG/OB boxes + fib/struktur + swing markers ──
-let _lwChart = null, _chartTf = "1h";
+// ── CHART VISUAL (lightweight-charts): candle + FVG/OB boxes + fib/struktur + liquidity + toggles ──
+let _lwChart = null, _lwCandle = null, _lwVol = null, _chartData = null, _chartDecs = 2, _chartTf = "1h";
+let _priceLines = [];
+const _ind = { fvg: true, fib: true, ob: true, struct: true, liq: true, vol: true };  // saklar indikator
 function _chartCols() {
   const dark = document.documentElement.getAttribute("data-theme") !== "light";
   return { text: dark ? "#93a1b0" : "#556", grid: dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.05)" };
 }
+// jumlah desimal presisi berdasar besaran harga (BTC 2, koin murah 0.08867 -> 5+)
+function _decsFor(a) { a = Math.abs(a || 1); return a >= 1000 ? 2 : a >= 1 ? 3 : a >= 0.1 ? 4 : a >= 0.01 ? 5 : a >= 0.001 ? 6 : a >= 0.0001 ? 7 : 8; }
+function _cp(p) { return p == null || isNaN(p) ? "—" : (+p).toFixed(_chartDecs); }   // harga presisi-penuh chart
 async function renderChart(sym, tf) {
   _chartTf = tf;
   document.getElementById("chartWrap").hidden = false;
@@ -245,38 +250,61 @@ async function renderChart(sym, tf) {
   if (!d.ok) { holder.innerHTML = `<p class="muted" style="padding:20px">${esc(d.error || "gagal")}</p>`; return; }
   holder.innerHTML = "";
   if (_lwChart) { try { _lwChart.remove(); } catch (e) { /* */ } _lwChart = null; }
+  _chartData = d; _priceLines = [];
+  _chartDecs = _decsFor((d.candles[d.candles.length - 1] || {}).close);
   const col = _chartCols();
   const chart = LightweightCharts.createChart(holder, {
     layout: { background: { type: "solid", color: "transparent" }, textColor: col.text, fontSize: 11 },
     grid: { vertLines: { color: col.grid }, horzLines: { color: col.grid } },
     timeScale: { timeVisible: true, secondsVisible: false, borderColor: "rgba(128,128,128,.3)" },
-    rightPriceScale: { borderColor: "rgba(128,128,128,.3)" },
-    crosshair: { mode: 1 }, width: holder.clientWidth, height: 430,
+    rightPriceScale: { borderColor: "rgba(128,128,128,.3)" }, crosshair: { mode: 1 },
+    width: holder.clientWidth, height: 430,
   });
-  const cs = chart.addCandlestickSeries({ upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350" });
+  const dec = _chartDecs;
+  const cs = chart.addCandlestickSeries({
+    upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+    priceFormat: { type: "custom", minMove: Math.pow(10, -dec), formatter: p => (+p).toFixed(dec) },  // presisi harga asli
+  });
   cs.setData(d.candles);
   const vs = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
   chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
   vs.setData(d.volume);
-  const pl = (price, color, title, style) => { if (price != null) cs.createPriceLine({ price: +price, color, lineWidth: 1, lineStyle: style ?? 2, axisLabelVisible: true, title: title || "" }); };
-  const fib = d.fib || {};
-  if (fib.golden_pocket) { pl(fib.golden_pocket[0], "#e6b800", "GP", 0); pl(fib.golden_pocket[1], "#e6b800", ""); }
-  if (fib.ote) { pl(fib.ote[0], "#c792ea", "OTE"); pl(fib.ote[1], "#c792ea", ""); }
-  if (fib.equilibrium) pl(fib.equilibrium, "rgba(128,128,128,.55)", "EQ");
-  const st = d.structure || {};
-  pl(st.last_swing_high, "rgba(239,83,80,.45)", "SwH"); pl(st.last_swing_low, "rgba(38,166,154,.45)", "SwL");
-  cs.setMarkers((d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.kind === "high" ? "arrowDown" : "arrowUp", text: s.kind === "high" ? "H" : "L" })));
-  chart.timeScale().fitContent();
-  _lwChart = chart;
-  const canvas = document.getElementById("chartCanvas");
-  const draw = () => _drawBoxes(chart, cs, d, canvas);
+  _lwChart = chart; _lwCandle = cs; _lwVol = vs;
+  const draw = () => _drawBoxes();
   chart.timeScale().subscribeVisibleTimeRangeChange(draw);
   chart.timeScale().subscribeVisibleLogicalRangeChange(draw);
   try { new ResizeObserver(() => { chart.applyOptions({ width: holder.clientWidth }); draw(); }).observe(holder); } catch (e) { /* */ }
+  chart.timeScale().fitContent();
+  _applyOverlays();
   setTimeout(draw, 80);
-  _renderChartLegend(d);
+  _renderIndicatorPanel(d);
 }
-function _drawBoxes(chart, cs, d, canvas) {
+// gambar/ulang overlay sesuai saklar (_ind) — TANPA hilang zoom
+function _applyOverlays() {
+  const cs = _lwCandle, d = _chartData; if (!cs || !d) return;
+  _priceLines.forEach(l => { try { cs.removePriceLine(l); } catch (e) { /* */ } }); _priceLines = [];
+  const pl = (price, color, title, style) => { if (price != null) _priceLines.push(cs.createPriceLine({ price: +price, color, lineWidth: 1, lineStyle: style ?? 2, axisLabelVisible: true, title: title || "" })); };
+  const fib = d.fib || {};
+  if (_ind.fib) {
+    if (fib.golden_pocket) { pl(fib.golden_pocket[0], "#e6b800", "GP", 0); pl(fib.golden_pocket[1], "#e6b800", ""); }
+    if (fib.ote) { pl(fib.ote[0], "#c792ea", "OTE"); pl(fib.ote[1], "#c792ea", ""); }
+    if (fib.equilibrium) pl(fib.equilibrium, "rgba(128,128,128,.55)", "EQ 0.5");
+  }
+  const st = d.structure || {};
+  if (_ind.struct) { pl(st.last_swing_high, "rgba(239,83,80,.5)", "SwH"); pl(st.last_swing_low, "rgba(38,166,154,.5)", "SwL"); }
+  if (_ind.liq) {
+    const lq = d.liquidity || {}, pools = lq.pools || {};
+    (pools.eqh || []).forEach(p => pl(p, "rgba(255,152,0,.6)", "EQH"));
+    (pools.eql || []).forEach(p => pl(p, "rgba(255,152,0,.6)", "EQL"));
+    if (lq.sweep && lq.sweep.swept && lq.sweep.level != null) pl(lq.sweep.level, "#ff5252", "SWEEP", 0);
+  }
+  cs.setMarkers(_ind.struct ? (d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.kind === "high" ? "arrowDown" : "arrowUp", text: s.kind === "high" ? "H" : "L" })) : []);
+  if (_lwVol) _lwVol.applyOptions({ visible: _ind.vol });
+  _drawBoxes();
+}
+function _drawBoxes() {
+  const chart = _lwChart, cs = _lwCandle, d = _chartData, canvas = document.getElementById("chartCanvas");
+  if (!chart || !cs || !d || !canvas) return;
   const holder = canvas.parentElement;
   const w = holder.clientWidth, h = holder.clientHeight, dpr = window.devicePixelRatio || 1;
   canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.width = w + "px"; canvas.style.height = h + "px";
@@ -290,18 +318,43 @@ function _drawBoxes(chart, cs, d, canvas) {
     ctx.fillStyle = fill; ctx.fillRect(x1, yy, w - x1, hh);
     ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(x1, yy, w - x1, hh);
   };
-  (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)"); });
-  (d.order_blocks || []).forEach(o => { const b = o.type === "bull"; box(o.from, o.top, o.bottom, b ? "rgba(66,165,245,.10)" : "rgba(255,167,38,.10)", b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
+  if (_ind.fvg) (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)"); });
+  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull"; box(o.from, o.top, o.bottom, b ? "rgba(66,165,245,.10)" : "rgba(255,167,38,.10)", b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
 }
-function _renderChartLegend(d) {
+// panel indikator: saklar checkbox bernama + detail AREA HARGA tiap deteksi
+function _renderIndicatorPanel(d) {
   const c = d.confluence || {}, sc = c.full_score;
   const chip = (t, cls) => `<span class="cl-chip ${cls || ""}">${t}</span>`;
-  document.getElementById("chartLegend").innerHTML =
-    chip(`score ${sc > 0 ? "+" : ""}${sc ?? "?"}`, sc > 0 ? "pos" : sc < 0 ? "neg" : "") +
+  const conf = chip(`score ${sc > 0 ? "+" : ""}${sc ?? "?"}`, sc > 0 ? "pos" : sc < 0 ? "neg" : "") +
     chip(`zona ${esc(c.zone || "?")}`) + (c.high_confluence ? chip("A+ confluence", "pos") : "") +
-    chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "") +
-    chip(`<span style="color:#26a69a">▧</span> FVG↑`) + chip(`<span style="color:#ef5350">▧</span> FVG↓`) +
-    chip(`<span style="color:#66a5f5">▧</span> Order Block`) + chip(`<span style="color:#e6b800">━</span> golden pocket`) + chip(`<span style="color:#c792ea">━</span> OTE`);
+    chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
+  const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
+  const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} <span class="muted">${esc(f.state || "")}</span>`);
+  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)}`);
+  const fibL = [];
+  if (fib.golden_pocket) fibL.push(`GP ${_cp(Math.min(...fib.golden_pocket))}–${_cp(Math.max(...fib.golden_pocket))}`);
+  if (fib.ote) fibL.push(`OTE ${_cp(Math.min(...fib.ote))}–${_cp(Math.max(...fib.ote))}`);
+  if (fib.equilibrium != null) fibL.push(`EQ ${_cp(fib.equilibrium)}`);
+  const stL = [st.last_swing_high != null ? `SwH ${_cp(st.last_swing_high)}` : null, st.last_swing_low != null ? `SwL ${_cp(st.last_swing_low)}` : null, st.event ? esc(String(st.event).toUpperCase()) : null].filter(Boolean);
+  const liqL = [];
+  (pools.eqh || []).forEach(p => liqL.push(`EQH ${_cp(p)}`));
+  (pools.eql || []).forEach(p => liqL.push(`EQL ${_cp(p)}`));
+  if (lq.sweep && lq.sweep.swept) liqL.push(`⚡ sweep ${esc(lq.sweep.type || "")} @ ${_cp(lq.sweep.level)}`);
+  const row = (key, color, name, items, note) => {
+    const detail = (items && items.length) ? items.join(" · ") : (note || `<span class="muted">tak terdeteksi</span>`);
+    return `<label class="ind-row"><input type="checkbox" data-ind="${key}"${_ind[key] ? " checked" : ""}><span class="ind-sw" style="background:${color}"></span><b class="ind-name">${name}</b><span class="ind-detail">${detail}</span></label>`;
+  };
+  const panel = document.getElementById("chartLegend");
+  panel.innerHTML = `<div class="cl-chips">${conf}</div>
+    <div class="ind-list">
+      ${row("fvg", "#26a69a", `FVG <span class="muted">(${(d.fvg || []).length})</span>`, fvgL)}
+      ${row("fib", "#e6b800", "Fibonacci · GP/OTE/EQ", fibL)}
+      ${row("ob", "#66a5f5", `Order Block <span class="muted">(${(d.order_blocks || []).length})</span>`, obL)}
+      ${row("struct", "#ef5350", "Struktur · Swing H/L", stL)}
+      ${row("liq", "#ff9800", "Liquidity · EQH/EQL/Sweep", liqL)}
+      ${row("vol", "#8aa0b0", "Volume", null, `<span class="muted">histogram bawah chart</span>`)}
+    </div>`;
+  panel.querySelectorAll("input[data-ind]").forEach(cb => cb.onchange = () => { _ind[cb.dataset.ind] = cb.checked; _applyOverlays(); });
 }
 document.querySelectorAll("#tfTabs button").forEach(b => b.onclick = () => { if (_activeSym) renderChart(_activeSym, b.dataset.tf); });
 
