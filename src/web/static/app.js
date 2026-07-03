@@ -39,6 +39,14 @@ function fmtPrice(p) {
   if (d <= 0) { const f = Math.pow(10, d); return String(Math.round(p * f) / f); }
   return p.toFixed(d);
 }
+function fmtQty(q) {
+  if (q == null || isNaN(q)) return "—";
+  const a = Math.abs(q);
+  if (a === 0) return "0";
+  if (a >= 1000) return Math.round(q).toLocaleString("en-US");           // 50123.4 -> "50,123"
+  const d = Math.max(0, 5 - 1 - Math.floor(Math.log10(a)));              // 5 angka penting
+  return q.toFixed(d).replace(/\.?0+$/, "");                            // 115.740741 -> "115.74"
+}
 function md(src) {
   const lines = (src || "").split("\n"); let html = "", inUl = false, inTbl = false;
   const closeUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
@@ -163,7 +171,7 @@ function _confluenceSection(title, d) {
       <div><span>Leverage</span><b>${d.leverage}x</b></div>
       <div><span>Risk</span><b>$${(d.risk_usd || 0).toFixed(2)} (${((d.risk_frac || 0) * 100).toFixed(2)}%)</b></div>
     </div>
-    <div class="tp-ladder">${(d.tps || []).map(t => `<div class="tp-step" title="${t.label} ${t.price ? fmtPrice(t.price) : "moonbag"} (${(t.frac * 100).toFixed(0)}%)"></div>`).join("")}</div>
+    <div class="tp-ladder">${(d.tps || []).map(t => `<div class="tp-step" title="${t.label} ${t.price ? fmtPrice(t.price) : "—"} (${(t.frac * 100).toFixed(0)}%)"></div>`).join("")}</div>
     <div class="tp-labels">${(d.tps || []).map(t => `<span>${t.label}</span>`).join("")}</div>`;
   } else {
     body += `<p class="muted" style="margin-top:8px">Alasan: ${esc(d.reason || "—")}</p>`;
@@ -262,7 +270,7 @@ function _posCard(p) {
     <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${p.leg === "long" ? "LONG" : "SHORT"} · ${p.leverage}x</span></span>
       <b class="${pnlCls}">${p.realized_pnl_usd >= 0 ? "+" : ""}$${(p.realized_pnl_usd || 0).toFixed(2)}${p.r_multiple != null ? ` (${p.r_multiple > 0 ? "+" : ""}${p.r_multiple}R)` : ""}</b></div>
     <div class="ac-grid"><div><span>Entry</span><b>${fmtPrice(p.entry)}</b></div><div><span>SL</span><b>${fmtPrice(p.sl)}</b></div>
-      <div><span>Qty sisa</span><b>${p.qty_remaining} / ${p.original_qty}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
+      <div><span>Qty sisa</span><b>${fmtQty(p.qty_remaining)} / ${fmtQty(p.original_qty)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
     ${_tpLadder(p.tps, p.fills)}
   </div>`;
 }
@@ -335,10 +343,18 @@ async function loadAgent(silent) {
 let _adminToken = localStorage.getItem("smc_admin_token") || "";
 async function initAdmin() {
   const out = document.getElementById("adminOut");
-  out.innerHTML = `<div class="field"><label>🔑 Password Admin</label><input id="admToken" type="password" value="${esc(_adminToken)}" placeholder="masukkan ADMIN_TOKEN"></div>
+  out.innerHTML = `<div class="field"><label>🔑 Password Admin</label>
+      <div style="display:flex;gap:8px;align-items:stretch">
+        <input id="admToken" type="password" value="${esc(_adminToken)}" placeholder="masukkan ADMIN_TOKEN" style="flex:1" autocomplete="current-password">
+        <button id="admLogin" class="save-btn" style="white-space:nowrap;margin:0">Masuk →</button>
+      </div></div>
     <p class="muted" style="font-size:12px;margin:-4px 0 14px">Password admin = <code>ADMIN_TOKEN</code>. Pertama kali: set di file <code>.env</code> runtime (<code>ADMIN_TOKEN=…</code>) lalu restart. Setelah itu bisa diganti dari panel ini (bagian Rahasia).</p>
-    <div id="admBody"><p class="muted">Masukkan password admin untuk mengelola mode otoritas agent, LLM, & kunci.</p></div>`;
-  document.getElementById("admToken").onchange = e => { _adminToken = e.target.value.trim(); localStorage.setItem("smc_admin_token", _adminToken); loadAdminConfig(); };
+    <div id="admBody"><p class="muted">Masukkan password admin lalu tekan <b>Masuk</b> (atau Enter) untuk mengelola mode otoritas agent, LLM, & kunci.</p></div>`;
+  const unlock = () => { _adminToken = document.getElementById("admToken").value.trim(); localStorage.setItem("smc_admin_token", _adminToken);
+    document.getElementById("admBody").innerHTML = `<p class="muted">memuat…</p>`; loadAdminConfig(); };
+  document.getElementById("admLogin").onclick = unlock;
+  document.getElementById("admToken").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); unlock(); } };
+  document.getElementById("admToken").onchange = unlock;
   if (_adminToken) loadAdminConfig();
 }
 const _AUTH_META = {
