@@ -135,7 +135,7 @@ def _dist_short(dc, win, pre, tp, wick_min, sideways_band, local_mult, min_rr, _
     return {"sl": sl, "entry": cur, "order": "market", "rr": rr, "sideways_high": sl}
 
 
-def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=None, min_rr: float = 3.0,
+def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=None, min_rr: float = 2.5,
                spike_mult: float = 6.0, pump_min: float = 0.30, wick_min: float = 0.45,
                base_quantile: float = 0.7, block_above: float = 0.15, sideways_win: int = 8,
                sideways_band: float = 0.12, local_mult: float = 1.15, tp_margin: float = 0.01) -> dict:

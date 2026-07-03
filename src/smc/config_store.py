@@ -66,6 +66,7 @@ GROUP_SPEC = {
     # funding gate — hindari funding tinggi yg menggerus PnL (agen/admin bisa longgar/ketat)
     "funding_max_pay_8h": ("float", 0.0001, 0.02),    # adverse funding/8j di atas ini -> tolak (0.01%..2%)
     "funding_max_profit_frac": ("float", 0.05, 1.0),  # funding boleh makan max X dari target profit
+    "pump_min_rr": ("float", 1.0, 10.0),   # RR minimum entry SHORT crime-pump (default 2.5)
 }
 
 

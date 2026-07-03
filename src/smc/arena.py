@@ -353,7 +353,7 @@ def check_open(cli=None) -> list[str]:
 _PUMP_CACHE: dict = {}     # {sym: (bar_ts_1d, verdict)} — refresh saat candle 1D baru (pola lambat)
 
 
-def _pump_for(cli, sym: str, tier, mkt: str):
+def _pump_for(cli, sym: str, tier, mkt: str, min_rr: float = 2.5):
     """Verdict anti crime-pump utk `sym` (hanya tier A/B/C) dari data 1D ~90 hari, di-cache per
     candle harian. Defensif: None bila tier tinggi / gagal fetch."""
     if tier not in ("A", "B", "C"):
@@ -374,7 +374,7 @@ def _pump_for(cli, sym: str, tier, mkt: str):
                     tfs.append((tf, cc[:-1], win))        # buang candle berjalan
             except Exception:  # noqa: BLE001
                 pass
-        verdict = pump_guard(c4h[:-1], tier, dist_tfs=tfs or None)
+        verdict = pump_guard(c4h[:-1], tier, dist_tfs=tfs or None, min_rr=min_rr)
         _PUMP_CACHE[sym] = (key, verdict)
         return verdict
     except Exception:  # noqa: BLE001
@@ -438,7 +438,7 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
         now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
         if not session_ok(now_dt, cfg["mode"], allow_asia=False):
             continue
-        pump = _pump_for(cli, sym, tier_map.get(sym), mkt)   # lapis anti crime-pump (tier A ke bawah)
+        pump = _pump_for(cli, sym, tier_map.get(sym), mkt, min_rr=cfg.get("pump_min_rr", 2.5))   # lapis anti crime-pump
         with SessionLocal() as s:
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
                 DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym,

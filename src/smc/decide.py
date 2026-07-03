@@ -20,7 +20,7 @@ GROUPS = {
         # max_open 4->10 (khusus web). Risk/margin per-trade DIKECILKAN agar agregat tetap sehat:
         # 10 x 0.5% = 5% risiko simultan · 10 x 1.5% = 15% margin simultan.
         "risk_pct": 0.005, "margin_cap": 0.015, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,  # gate funding
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "pump_min_rr": 2.5,  # gate funding+pump
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 6,     # limit order kadaluarsa 6 jam (main cepat)
     },
@@ -29,7 +29,7 @@ GROUPS = {
         "lev_min": 8, "lev_max": 15, "stop_ref": (0.01, 0.08),
         # max_open 4->10 (khusus web). 10 x 1% = 10% risiko simultan · 10 x 3.5% = 35% margin simultan.
         "risk_pct": 0.01, "margin_cap": 0.035, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "pump_min_rr": 2.5,
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 48,     # limit order kadaluarsa 48 jam
     },
