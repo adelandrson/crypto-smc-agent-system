@@ -40,7 +40,8 @@ def universe_api():
                          .order_by(TIER_ORDER, Token.volume_24h.desc().nullslast())).all()
         return {"tokens": [{"symbol": r.symbol, "name": r.name, "market_cap": r.market_cap,
                             "volume_24h": r.volume_24h, "tier": r.tier,
-                            "scalp_tier": r.scalp_tier, "swing_tier": r.swing_tier, "cmc_rank": r.cmc_rank}
+                            "scalp_tier": r.scalp_tier, "swing_tier": r.swing_tier,
+                            "percent_change_24h": r.percent_change_24h, "cmc_rank": r.cmc_rank}
                            for r in rows]}
 
 
@@ -162,9 +163,21 @@ def agent_api():
                     "closed_at": r.closed_at.isoformat() if r.closed_at else None,
                     "tps": json.loads(r.tps), "fills": _fills(r.id)}
 
+        open_list = [_row(r) for r in open_rows]
+        # ROI per gaya: realized (dari equity closed+open) + unrealized (mark-to-market posisi terbuka)
+        unreal_by_group: dict = {}
+        for o in open_list:
+            if o.get("unrealized_pnl_usd") is not None:
+                unreal_by_group[o["group"]] = unreal_by_group.get(o["group"], 0.0) + o["unrealized_pnl_usd"]
+        summary = arena.summary()
+        for row in summary:
+            u = unreal_by_group.get(row["group"], 0.0)
+            row["unrealized_pnl_usd"] = round(u, 2)
+            row["roi_realized_pct"] = row["return_pct"]                       # dari trade tertutup + biaya
+            row["roi_total_pct"] = round((row["equity"] + u) / arena.START_EQUITY * 100 - 100, 2)  # + posisi terbuka
         return {"available": True, "pending": [_row(r) for r in pending_rows],
-                "open": [_row(r) for r in open_rows],
-                "closed": [_row(r) for r in closed_rows], "summary": arena.summary()}
+                "open": open_list,
+                "closed": [_row(r) for r in closed_rows], "summary": summary}
 
 
 @app.post("/api/agent/reset")

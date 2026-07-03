@@ -246,12 +246,13 @@ function renderUniverse() {
   const q = (document.getElementById("uniSearch").value || "").toUpperCase();
   const rows = _uniRows.filter(r => !q || r.symbol.includes(q) || (r.name || "").toUpperCase().includes(q));
   if (!rows.length) { out.innerHTML = `<p class="muted">Belum ada data universe — jalankan refresh (chat: "refresh universe").</p>`; return; }
-  const thead = `<tr><th>Koin</th><th>Tier Scalp</th><th>Tier Swing</th><th class="r">Mcap</th><th class="r">Volume 24h</th><th class="r">CMC Rank</th></tr>`;
+  const thead = `<tr><th>Koin</th><th>Tier Scalp</th><th>Tier Swing</th><th class="r">Mcap</th><th class="r">Volume 24h</th><th class="r">24 jam</th></tr>`;
   const badge = t => `<span class="tier-badge ${esc(t || "")}">${esc(t || "—")}</span>`;
+  const chg = v => v == null ? `<span class="muted">—</span>` : `<span class="${v >= 0 ? "pos" : "neg"}">${v >= 0 ? "+" : ""}${v.toFixed(2)}%</span>`;
   const rowFn = r => `<tr><td><b>${esc(r.symbol)}</b> <span class="muted">${esc(r.name || "")}</span></td>
     <td>${badge(r.scalp_tier)}</td><td>${badge(r.swing_tier)}</td>
     <td class="r">$${fmtUsd(r.market_cap)}</td><td class="r">$${fmtUsd(r.volume_24h)}</td>
-    <td class="r muted">${r.cmc_rank ?? "—"}</td></tr>`;
+    <td class="r">${chg(r.percent_change_24h)}</td></tr>`;
   out.innerHTML = pagedTable("uni", "Universe", thead, rows, rowFn, { open: true, per: 20 });
 }
 document.getElementById("uniSearch").oninput = renderUniverse;
@@ -318,11 +319,17 @@ async function loadAgent(silent) {
     const d = await (await fetch("/api/agent")).json();
     summ.innerHTML = `<div class="agent-cards">${(d.summary || []).map(s => `
       <div class="agent-card"><div class="grp-h">${esc(s.group)}</div>
-        <div class="ac-big">$${s.equity.toFixed(2)} <small>${s.return_pct >= 0 ? "+" : ""}${s.return_pct}%</small></div>
+        <div class="ac-big">$${s.equity.toFixed(2)}</div>
+        <div class="roi-row">
+          <div class="roi-box"><span>ROI total<small>(+ posisi terbuka)</small></span><b class="${(s.roi_total_pct ?? s.return_pct) >= 0 ? "pos" : "neg"}">${(s.roi_total_pct ?? s.return_pct) >= 0 ? "+" : ""}${s.roi_total_pct ?? s.return_pct}%</b></div>
+          <div class="roi-box"><span>ROI realized<small>(trade tutup)</small></span><b class="${s.return_pct >= 0 ? "pos" : "neg"}">${s.return_pct >= 0 ? "+" : ""}${s.return_pct}%</b></div>
+        </div>
         <div class="ac-grid"><div><span>Open</span><b>${s.open}</b></div><div><span>Closed</span><b>${s.closed}</b></div>
           <div><span>Win-rate</span><b>${s.win_rate != null ? s.win_rate + "%" : "—"}</b></div>
-          <div><span>Leverage</span><b>${esc(s.leverage_range)}</b></div></div>
-        <div class="ac-expectancy">Expectancy: <b>${s.expectancy_r != null ? (s.expectancy_r > 0 ? "+" : "") + s.expectancy_r + "R" : "belum cukup sampel"}</b></div>
+          <div><span>Unreal. PnL</span><b class="${(s.unrealized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">${(s.unrealized_pnl_usd || 0) >= 0 ? "+" : ""}$${(s.unrealized_pnl_usd || 0).toFixed(2)}</b></div>
+          <div><span>Leverage</span><b>${esc(s.leverage_range)}</b></div>
+          <div><span>Max posisi</span><b>${s.max_open}</b></div></div>
+        <div class="ac-expectancy">Expectancy: <b>${s.expectancy_r != null ? (s.expectancy_r > 0 ? "+" : "") + s.expectancy_r + "R" : "belum cukup sampel"}</b> <span class="muted">— ukuran utama, bukan win-rate</span></div>
       </div>`).join("")}</div>`;
     let html = "";
     if (d.pending && d.pending.length) html += `<h3 class="ag-h">LIMIT order menunggu (${d.pending.length})</h3>` + d.pending.map(_pendingCard).join("");

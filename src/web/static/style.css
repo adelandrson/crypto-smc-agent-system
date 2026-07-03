@@ -318,3 +318,10 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 .tpp-row b { color: var(--ink); font-weight: 600; }
 .tpp-row.hdr { font-size: 11px; opacity: .75; }
 .tpp-row.done, .tpp-row.done b { color: var(--pos); }
+
+/* ROI per gaya di ringkasan Agent */
+.roi-row { display: flex; gap: 8px; margin: 8px 0 10px; }
+.roi-box { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; }
+.roi-box span { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.roi-box span small { text-transform: none; letter-spacing: 0; opacity: .7; margin-left: 3px; }
+.roi-box b { font-size: 17px; font-weight: 700; }

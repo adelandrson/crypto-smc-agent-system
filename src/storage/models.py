@@ -45,6 +45,7 @@ class Token(Base):
     name: Mapped[str | None] = mapped_column(String(128))
     market_cap: Mapped[float | None] = mapped_column(Float)
     volume_24h: Mapped[float | None] = mapped_column(Float)
+    percent_change_24h: Mapped[float | None] = mapped_column(Float)   # gain/loss harga 24 jam (CMC)
     cmc_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # legacy (=swing_tier)
     scalp_tier: Mapped[str | None] = mapped_column(String(4), nullable=True, index=True)  # S/A/B/C mcap40/vol60

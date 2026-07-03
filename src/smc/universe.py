@@ -104,6 +104,7 @@ def build() -> dict:
             token.name = coin.get("name")
             token.market_cap = mcap
             token.volume_24h = usd.get("volume_24h")
+            token.percent_change_24h = usd.get("percent_change_24h")
             token.cmc_rank = coin.get("cmc_rank")
             token.exclude_reason = reason
             token.tradable = tradable
