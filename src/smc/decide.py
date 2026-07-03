@@ -89,6 +89,10 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
                                    max_pullback=cfg.get("limit_max_pullback", 0.05),
                                    min_pullback=cfg.get("limit_min_pullback", 0.0015))
     sl = structure_sl(direction, entry, c["nearest_fvg"], c["structure"])
+    # SHORT crime-pump: SL = harga WICK TERTINGGI selama pump (jaga bila pump lanjut), bukan struktur biasa
+    pump_short = bool(pump and pump.get("short_ok") and direction < 0 and pump.get("short_sl"))
+    if pump_short and pump["short_sl"] > entry:
+        sl = pump["short_sl"]
     if (direction > 0 and sl >= entry) or (direction < 0 and sl <= entry):
         return {"action": "skip", "reason": "invalid SL vs entry", "confluence": c}
     stop_dist = abs(entry - sl) / entry
@@ -114,11 +118,9 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
                                 liquidity_pools=c.get("liquidity_pools"),
                                 fib_extensions=c.get("fib_extensions"), n=n_tp)
     tps = tp_targets(direction, entry, sl, mode=mode, levels=levels, prices=tp_px)
-    # SHORT crime-pump: target profit = harga PRA-PUMP (retrace penuh) -> set TP terjauh ke sana
-    if pump and pump.get("short_ok") and direction < 0 and pump.get("pre_pump_price"):
-        target = pump["pre_pump_price"]
-        if tps and (tps[-1].get("price") is None or target < tps[-1]["price"]):
-            tps[-1]["price"] = target
+    # SHORT crime-pump: TP TUNGGAL 100% di ~<=1% DI ATAS harga pra-pump (retrace penuh)
+    if pump_short and pump.get("short_tp"):
+        tps = [{"label": "TP1", "frac": 1.0, "price": pump["short_tp"], "sl_after": {}}]
     # FUNDING GATE: tolak bila funding yg DIBAYAR (adverse) menggerus PnL (hanya sisi yg membayar)
     tp1_px = tps[0].get("price") if tps else None
     ok, freason = funding_gate(

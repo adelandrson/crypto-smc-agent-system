@@ -359,14 +359,18 @@ def _pump_for(cli, sym: str, tier, mkt: str):
     if tier not in ("A", "B", "C"):
         return None
     try:
-        daily = cli.fetch_ohlcv(f"{sym}/USDT", "1d", limit=90, market_type=mkt)
-        if not daily or len(daily) < 31:
+        htf = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)   # macro pump 30-42 hari
+        if not htf or len(htf) < 40:
             return None
-        key = daily[-1][0]
+        key = htf[-1][0]
         cached = _PUMP_CACHE.get(sym)
         if cached and cached[0] == key:
             return cached[1]
-        verdict = pump_guard(daily[:-1], tier)    # buang candle 1D berjalan
+        try:
+            ltf = cli.fetch_ohlcv(f"{sym}/USDT", "1h", limit=300, market_type=mkt)   # distribusi halus 1h
+        except Exception:  # noqa: BLE001
+            ltf = None
+        verdict = pump_guard(htf[:-1], tier, dist_candles=(ltf[:-1] if ltf else None))
         _PUMP_CACHE[sym] = (key, verdict)
         return verdict
     except Exception:  # noqa: BLE001

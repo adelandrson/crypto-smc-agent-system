@@ -277,19 +277,22 @@ def test_funding_gate_blocks_paying_side_only():
 
 
 def test_pump_guard_blocks_long_gates_short():
-    """pump_guard web: koin tier rendah crime-pump -> blokir LONG; SHORT hanya bila distribusi selesai."""
+    """pump_guard web: crime-pump koin tier rendah -> blokir LONG; SHORT bila DISTRIBUSI FINAL
+    (sideways-top + LOCAL-peak volume wick-reject); SL=wick tertinggi, TP=~1% di atas pra-pump."""
     from src.smc.risk import pump_guard
-    C = []
-    t = 0
+    C = []; t = 0
     for _ in range(30):
         C.append([t, 10.0, 10.1, 9.9, 10.0, 100.0]); t += 86400000
-    C.append([t, 10.0, 15.0, 10.0, 14.0, 1000.0]); t += 86400000        # PUMP spike
-    for _ in range(4):
-        C.append([t, 14.0, 15.0, 13.5, 14.0, 700.0]); t += 86400000     # distribusi wick atas
-    C.append([t, 14.0, 15.0, 13.0, 13.2, 1500.0]); t += 86400000        # DUMP vol-tertinggi wick-reject
-    for _ in range(4):
-        C.append([t, 13.2, 13.3, 12.9, 13.0, 120.0]); t += 86400000
+    C.append([t, 10.0, 15.0, 10.0, 14.0, 1000.0]); t += 86400000        # PUMP -> peak wick 15
+    sw = [650, 680, 900, 640, 660, 630, 650, 620]                       # local-peak vol=900 (bukan global-max)
+    for k, vol in enumerate(sw):
+        c = 13.8 if k == len(sw) - 1 else 14.0
+        C.append([t, 14.0, 14.9, 13.5, c, float(vol)]); t += 86400000   # sideways-top, wick atas
     assert pump_guard(C, "S")["is_pump"] is False                        # major -> lewati
     v = pump_guard(C, "B")
     assert v["is_pump"] and v["block_long"] and v["short_ok"]
-    assert abs(v["pre_pump_price"] - 10.0) < 0.5                         # target short ~= pra-pump
+    assert abs(v["short_sl"] - 15.0) < 0.01 and abs(v["short_tp"] - 10.1) < 0.05
+    # volume sideways SAMA (tak ada local-peak) -> distribusi belum final
+    for i in range(31, len(C)):
+        C[i][5] = 650.0
+    assert pump_guard(C, "B")["short_ok"] is False

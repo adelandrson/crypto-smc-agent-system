@@ -145,13 +145,19 @@ mengubah rentang skor.
 - **Gerbang funding**: bila posisi akan **MEMBAYAR** funding yang tinggi (adverse), entry ditolak —
   ada dua ambang: **absolut** (> 0.1%/8j → tolak) dan **relatif** (estimasi biaya funding selama hold
   > 35% dari jarak profit ke TP1). Funding yang **DITERIMA** (menguntungkan posisi) tak pernah memblokir.
-- **Lapis anti crime-pump/dump** (koin **tier A ke bawah**, mcap/volume rendah): pakai data **1D ~90
-  hari** untuk mendeteksi manipulasi — volume per-candle sebelumnya konsisten sangat kecil (baseline),
-  lalu **spike volume** mengangkat harga tinggi (pump artifisial). Aksi: **BLOKIR LONG** selama harga
-  masih di puncak pump; **SHORT hanya bila DISTRIBUSI SELESAI** — ada candle wick-rejection atas dengan
-  **volume manipulasi TERTINGGI** (tanda bandar sudah buang barang) + harga sudah turun dari puncak +
-  beberapa wick-rejection, dengan **target profit = harga PRA-PUMP** (retrace penuh; sisa volume =
-  retail FOMO di harga atas). *(Contoh nyata: MANTA — spike 102× baseline, pump +122%.)*
+- **Lapis anti crime-pump/dump** (koin **tier A ke bawah**, mcap/volume rendah): pump-macro dideteksi
+  di **4h (~30–42 hari baseline)**, sedangkan **distribusi-final dinilai di 1h** (sideways-top &
+  wick-rejection paling jelas di 1h; sering ter-smooth di 4h). Deteksi manipulasi — volume per-candle
+  sebelumnya konsisten sangat
+  kecil (baseline), lalu **spike volume** mengangkat harga tinggi (pump artifisial). Aksi:
+  - **BLOKIR LONG** selama harga masih di puncak pump.
+  - **SHORT hanya bila DISTRIBUSI FINAL** — dua syarat: (1) harga mulai **sideways di atas** (high
+    berkelompok) dengan **beberapa wick-rejection atas**; (2) volume sideways relatif sejajar dengan
+    sebuah **local-peak volume** di tengahnya (lebih tinggi dari tetangga kiri-kanan — **bukan** volume
+    tertinggi keseluruhan) pada candle wick-rejection = penanda bandar telah menyelesaikan distribusi.
+    **SL = harga wick tertinggi selama pump** (jaga bila pump lanjut); **TP 100% ≈ ≤1% di atas harga
+    pra-pump** (retrace penuh; sisa volume = retail FOMO di atas). *(Detektor konservatif: hanya
+    memicu short pada distribusi bersih; pump yang dump seketika tetap memblokir long.)*
 
 **Entry FLEKSIBEL** — harga kini **sudah di zona** (FVG/OB/OTE) → **market**; belum → **limit** di
 retest zona (pending → terisi saat pullback / batal bila TTL habis atau harga kabur).
