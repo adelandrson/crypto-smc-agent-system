@@ -26,7 +26,7 @@ function startAgentPoll() { stopAgentPoll(); if (_agentLive) _agentTimer = setIn
 function stopAgentPoll() { if (_agentTimer) { clearInterval(_agentTimer); _agentTimer = null; } }
 
 // ── util ──────────────────────────────────────────────
-const esc = s => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const fmtUsd = n => n == null ? "—" : (Math.abs(n) >= 1e9 ? (n / 1e9).toFixed(1) + "B" : Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(0) + "M" : Math.abs(n) >= 1e3 ? (n / 1e3).toFixed(0) + "k" : n.toFixed(0));
 // Angka utama (significant figures): harga >=$1000 -> 5 sig-fig; <$1000 -> 4 sig-fig.
 // Contoh: BTC 60130, ETH 1630.5, SOL 77.67, UNI 3.055, SUI 0.7239.
