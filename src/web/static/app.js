@@ -48,6 +48,8 @@ function fmtQty(q) {
   const d = Math.max(0, 5 - 1 - Math.floor(Math.log10(a)));              // 5 angka penting
   return q.toFixed(d).replace(/\.?0+$/, "");                            // 115.740741 -> "115.74"
 }
+// arah trade ringkas: L hijau (long) / S merah (short), tebal
+const legTag = leg => leg === "long" ? '<b class="pos">L</b>' : '<b class="neg">S</b>';
 function md(src) {
   const lines = (src || "").split("\n"); let html = "", inUl = false, inTbl = false;
   const closeUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
@@ -283,7 +285,7 @@ function _tpLadder(tps, fills) {
 function _posCard(p) {
   const pnlCls = (p.realized_pnl_usd || 0) >= 0 ? "pos" : "neg";
   return `<div class="pos-card">
-    <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${p.leg === "long" ? "LONG" : "SHORT"} · ${p.leverage}x</span></span>
+    <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${legTag(p.leg)} · ${p.leverage}x</span></span>
       <b class="${pnlCls}">${p.realized_pnl_usd >= 0 ? "+" : ""}$${(p.realized_pnl_usd || 0).toFixed(2)}${p.r_multiple != null ? ` (${p.r_multiple > 0 ? "+" : ""}${p.r_multiple}R)` : ""}</b></div>
     <div class="ac-grid"><div><span>Entry</span><b>${fmtPrice(p.entry)}</b></div><div><span>SL</span><b>${fmtPrice(p.sl)}</b></div>
       <div><span>Qty sisa</span><b>${fmtQty(p.qty_remaining)} / ${fmtQty(p.original_qty)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
@@ -311,7 +313,7 @@ function _tpPrices(p) {
   return `<div class="tpp"><div class="tpp-row hdr"><span>Entry ${fmtPrice(p.entry)}</span><b>SL ${fmtPrice(p.sl)}</b></div>${rows}</div>`;
 }
 function _pendingCard(p) {
-  const dir = p.leg === "long" ? "LONG" : "SHORT";
+  const dir = legTag(p.leg);
   return `<div class="pos-card pending">
     <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${dir} · ${p.leverage}x</span></span>
       <span class="pending-badge">◷ LIMIT menunggu</span></div>
@@ -364,7 +366,7 @@ async function loadAgent(silent) {
         const fillsStr = fills.length ? fills.map(f => `${esc(f.label)} ${r.original_qty ? (f.qty / r.original_qty * 100).toFixed(0) + "%" : ""} @ ${fmtPrice(f.price)} (${f.pnl_usd >= 0 ? "+" : ""}$${(f.pnl_usd || 0).toFixed(2)})`).join(" · ") : "—";
         return `<tr class="ct-sum">
           <td><b>${esc(r.symbol)}</b> <span class="muted">${esc(r.group)}</span></td>
-          <td>${r.leg === "long" ? '<span class="pos">LONG</span>' : '<span class="neg">SHORT</span>'} <span class="muted">${r.leverage}x</span></td>
+          <td>${legTag(r.leg)} <span class="muted">${r.leverage}x</span></td>
           <td class="r">${fmtPrice(r.entry)}</td>
           <td class="r">${exitStr}</td>
           <td class="r ${(r.realized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">${(r.realized_pnl_usd || 0) >= 0 ? "+" : ""}$${(r.realized_pnl_usd || 0).toFixed(2)}</td>
