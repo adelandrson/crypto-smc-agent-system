@@ -350,37 +350,42 @@ def check_open(cli=None) -> list[str]:
 
 
 # ── lapis anti crime-pump (koin tier A ke bawah) ─────────────────────────────
-_PUMP_CACHE: dict = {}     # {sym: (bar_ts_1d, verdict)} — refresh saat candle 1D baru (pola lambat)
+_PUMP_CACHE: dict = {}     # {sym: (monotonic_ts, verdict)} — cache berbasis WAKTU (TTL)
+_PUMP_TTL = 1800.0         # 30 menit: verdict pump di-refresh tiap 30 mnt (hemat Binance, cegah throttle)
 
 
 def _pump_for(cli, sym: str, tier, mkt: str, min_rr: float = 2.5, spike_min: float = 15.0,
               mcap_ceiling: float = 5e9, mcap=None):
     """Verdict anti crime-pump utk `sym` (tier A/B/C). PUMP-macro dari data 1D ~90 hari (spike volume
-    vs baseline + mcap), distribusi lintas TF 1D>4h>1h>15m. Cache per candle 15m (fresh utk entry).
+    vs baseline + mcap), distribusi lintas TF 1D>4h>1h>15m. Di-cache berbasis WAKTU (TTL 30 mnt) — TAK
+    fetch tiap panggilan (kalau tidak, scan 20-detik-an membanjiri Binance -> IP di-throttle -> web hang).
     Defensif: None bila tier tinggi / gagal fetch."""
     if tier not in ("A", "B", "C"):
         return None
+    import time as _t
+    now = _t.monotonic()
+    cached = _PUMP_CACHE.get(sym)
+    if cached and (now - cached[0]) < _PUMP_TTL:          # cache hit -> TANPA fetch apa pun
+        return cached[1]
     try:
-        m15 = cli.fetch_ohlcv(f"{sym}/USDT", "15m", limit=500, market_type=mkt)   # key cache (refresh 15m)
-        if not m15 or len(m15) < 40:
-            return None
-        key = m15[-1][0]
-        cached = _PUMP_CACHE.get(sym)
-        if cached and cached[0] == key:
-            return cached[1]                              # cache hit -> hemat fetch 1D/4h/1h
         d1 = cli.fetch_ohlcv(f"{sym}/USDT", "1d", limit=90, market_type=mkt)      # macro pump: spike 90 hari
         if not d1 or len(d1) < 40:
+            _PUMP_CACHE[sym] = (now, None)               # simpan 'gagal' juga -> hormati TTL, jangan retry beruntun
             return None
-        c4h = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)
-        h1 = cli.fetch_ohlcv(f"{sym}/USDT", "1h", limit=300, market_type=mkt)
-        tfs = [(tf, cc[:-1], win) for tf, cc, win in                              # distribusi 1D>4h>1h>15m
-               (("1d", d1, 6), ("4h", c4h, 8), ("1h", h1, 18), ("15m", m15, 32))
-               if cc and len(cc) >= max(10, win) + 1]
-        verdict = pump_guard(d1[:-1], tier, dist_tfs=tfs or None, min_rr=min_rr,
+        tfs = [("1d", d1[:-1], 6)]                        # distribusi lintas TF: 1D + 4h + 1h + 15m
+        for tf, lim, win in (("4h", 250, 8), ("1h", 300, 18), ("15m", 500, 32)):
+            try:
+                cc = cli.fetch_ohlcv(f"{sym}/USDT", tf, limit=lim, market_type=mkt)
+                if cc and len(cc) >= max(10, win) + 1:
+                    tfs.append((tf, cc[:-1], win))
+            except Exception:  # noqa: BLE001
+                pass
+        verdict = pump_guard(d1[:-1], tier, dist_tfs=tfs, min_rr=min_rr,
                              spike_min=spike_min, mcap=mcap, mcap_ceiling=mcap_ceiling)
-        _PUMP_CACHE[sym] = (key, verdict)
+        _PUMP_CACHE[sym] = (now, verdict)
         return verdict
     except Exception:  # noqa: BLE001
+        _PUMP_CACHE[sym] = (now, None)
         return None
 
 

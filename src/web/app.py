@@ -103,14 +103,17 @@ def _live_prices() -> dict:
     now = _t.monotonic()
     if _price_cache["prices"] and now - _price_cache["ts"] < 3.0:
         return _price_cache["prices"]
+    if now - _price_cache.get("last_try", 0) < 2.0:      # jangan retry beruntun saat Binance down
+        return _price_cache["prices"]
+    _price_cache["last_try"] = now
     try:
         from src.smc.base import http_get_json
-        rows = http_get_json("https://fapi.binance.com/fapi/v1/ticker/price")
+        rows = http_get_json("https://fapi.binance.com/fapi/v1/ticker/price", timeout=4.0)  # FAIL-FAST
         _price_cache["prices"] = {r["symbol"]: float(r["price"]) for r in rows
                                   if str(r.get("symbol", "")).endswith("USDT")}
         _price_cache["ts"] = now
     except Exception:  # noqa: BLE001
-        pass
+        pass                                              # Binance down -> pakai cache lama, JANGAN hang API
     return _price_cache["prices"]
 
 
