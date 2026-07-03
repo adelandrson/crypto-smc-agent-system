@@ -160,25 +160,29 @@ def chart_api(symbol: str, tf: str = "1h"):
     start = sec(raw[0][0])
     fvgs = []
     for f in (fv.get("fvgs") or []):
-        if f.get("state") == "mitigated":
+        if not f.get("is_active"):              # HANYA FVG hidup (bukan filled/invalidated = zona mati)
             continue
         fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
                      "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
     obs = []
-    for ob in (sf.get("order_blocks") or []):
-        if ob.get("status") == "mitigated":
-            continue
+    for ob in (sf.get("order_blocks") or []):   # tampilkan SEMUA OB (fresh + retest/mitigated), beri status
         idx = ob.get("index")
         t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
-        obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"), "from": t})
-    swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"]}
+        obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"),
+                    "status": ob.get("status"), "from": t})
+    swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"],
+               "provisional": bool(s.get("provisional"))}
               for s in (sf.get("swings") or []) if s.get("time")]
+    px = raw[-1][4]                              # urutkan zona per KEDEKATAN ke harga (paling tradeable dulu)
+    near = lambda z: 0.0 if z["bottom"] <= px <= z["top"] else min(abs(px - z["top"]), abs(px - z["bottom"]))
+    fvgs.sort(key=near)
+    obs.sort(key=near)
     fib = (sf.get("active_leg") or {}).get("fib") or {}
     struct = sf.get("structure") or {}
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,
-        "fvg": fvgs[-6:], "order_blocks": obs[-4:], "swings": swings[-8:],
+        "fvg": fvgs[:6], "order_blocks": obs[:4], "swings": swings[-8:],
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction")},

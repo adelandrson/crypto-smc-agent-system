@@ -9,15 +9,23 @@ def _swings():
 
 
 def test_detects_known_swings():
-    sw = _swings()
+    sw = [p for p in _swings() if not p.provisional]     # confirmed pivots only
     assert [p.kind for p in sw] == ["low", "high", "low", "high"]
     assert [p.index for p in sw] == [5, 12, 18, 24]
 
 
 def test_swing_prices_match_extremes():
-    sw = _swings()
+    sw = [p for p in _swings() if not p.provisional]
     prices = [round(p.price, 1) for p in sw]
     assert prices == [89.9, 120.1, 95.9, 128.1]
+
+
+def test_developing_pivot_tracks_current_leg():
+    # After the last confirmed pivot (high@24), the live down-leg's running low is a
+    # PROVISIONAL swing so structure/Fib track the developing extreme, not a stale pivot.
+    dev = _swings()[-1]
+    assert dev.provisional is True
+    assert dev.kind == "low" and dev.index == 26 and round(dev.price, 1) == 121.9
 
 
 def test_atr_filter_drops_noise():

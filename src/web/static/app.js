@@ -298,7 +298,7 @@ function _applyOverlays() {
     (pools.eql || []).forEach(p => pl(p, "rgba(255,152,0,.6)", "EQL"));
     if (lq.sweep && lq.sweep.swept && lq.sweep.level != null) pl(lq.sweep.level, "#ff5252", "SWEEP", 0);
   }
-  cs.setMarkers(_ind.struct ? (d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.kind === "high" ? "arrowDown" : "arrowUp", text: s.kind === "high" ? "H" : "L" })) : []);
+  cs.setMarkers(_ind.struct ? (d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.provisional ? "circle" : (s.kind === "high" ? "arrowDown" : "arrowUp"), text: (s.kind === "high" ? "H" : "L") + (s.provisional ? "?" : "") })) : []);
   if (_lwVol) _lwVol.applyOptions({ visible: _ind.vol });
   _drawBoxes();
 }
@@ -319,7 +319,7 @@ function _drawBoxes() {
     ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(x1, yy, w - x1, hh);
   };
   if (_ind.fvg) (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)"); });
-  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull"; box(o.from, o.top, o.bottom, b ? "rgba(66,165,245,.10)" : "rgba(255,167,38,.10)", b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
+  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull", fresh = o.status !== "mitigated"; box(o.from, o.top, o.bottom, b ? (fresh ? "rgba(66,165,245,.14)" : "rgba(66,165,245,.05)") : (fresh ? "rgba(255,167,38,.14)" : "rgba(255,167,38,.05)"), b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
 }
 // panel indikator: saklar checkbox bernama + detail AREA HARGA tiap deteksi
 function _renderIndicatorPanel(d) {
@@ -330,12 +330,13 @@ function _renderIndicatorPanel(d) {
     chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
   const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
   const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} <span class="muted">${esc(f.state || "")}</span>`);
-  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)}`);
+  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
   const fibL = [];
   if (fib.golden_pocket) fibL.push(`GP ${_cp(Math.min(...fib.golden_pocket))}–${_cp(Math.max(...fib.golden_pocket))}`);
   if (fib.ote) fibL.push(`OTE ${_cp(Math.min(...fib.ote))}–${_cp(Math.max(...fib.ote))}`);
   if (fib.equilibrium != null) fibL.push(`EQ ${_cp(fib.equilibrium)}`);
-  const stL = [st.last_swing_high != null ? `SwH ${_cp(st.last_swing_high)}` : null, st.last_swing_low != null ? `SwL ${_cp(st.last_swing_low)}` : null, st.event ? esc(String(st.event).toUpperCase()) : null].filter(Boolean);
+  const lastSw = (d.swings || []).slice(-1)[0], provKind = lastSw && lastSw.provisional ? lastSw.kind : null;
+  const stL = [st.last_swing_high != null ? `SwH ${_cp(st.last_swing_high)}${provKind === "high" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.last_swing_low != null ? `SwL ${_cp(st.last_swing_low)}${provKind === "low" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.event ? esc(String(st.event).toUpperCase()) : null].filter(Boolean);
   const liqL = [];
   (pools.eqh || []).forEach(p => liqL.push(`EQH ${_cp(p)}`));
   (pools.eql || []).forEach(p => liqL.push(`EQL ${_cp(p)}`));

@@ -21,6 +21,7 @@ class Pivot:
     time: float
     price: float
     kind: str  # "high" | "low"
+    provisional: bool = False  # True = developing extreme of the current (unconfirmed) leg
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,5 +76,39 @@ def zigzag(pivots: Sequence[Pivot], atr: Sequence[float], atr_mult: float = 0.5)
     return z
 
 
+def developing_pivot(bars: Sequence[Bar], swings: Sequence[Pivot], atr: Sequence[float],
+                     atr_mult: float = 0.5) -> Pivot | None:
+    """Provisional extreme of the CURRENT (still-unconfirmed) leg since the last confirmed pivot.
+
+    Fractal pivots lag confirmation by `depth` bars, so the live leg's extreme (e.g. a fresh swing
+    low made 2 bars ago) is never a confirmed pivot yet — leaving structure/Fib anchored to a STALE
+    swing. This returns the running extreme of the leg after the last confirmed pivot (a running low
+    when the last pivot was a high, else a running high), IF the move is structurally significant
+    (>= atr_mult x ATR). Honest: uses only printed bars, no look-ahead. Marked `provisional=True`.
+    """
+    if not swings or not bars:
+        return None
+    last = swings[-1]
+    n = len(bars)
+    start = last.index + 1
+    if start >= n:
+        return None
+    rng = range(start, n)
+    if last.kind == "high":                       # current leg is DOWN -> track running low
+        ext_i = min(rng, key=lambda i: bars[i].low)
+        ext_p, kind, moved = bars[ext_i].low, "low", last.price - bars[ext_i].low
+    else:                                          # current leg is UP -> track running high
+        ext_i = max(rng, key=lambda i: bars[i].high)
+        ext_p, kind, moved = bars[ext_i].high, "high", bars[ext_i].high - last.price
+    a = atr[ext_i] if 0 <= ext_i < len(atr) else (atr[-1] if atr else 0.0)
+    if moved < atr_mult * a:                       # leg not significant yet -> no provisional swing
+        return None
+    return Pivot(ext_i, bars[ext_i].time, ext_p, kind, provisional=True)
+
+
 def significant_swings(bars, atr, depth=10, atr_mult=0.5) -> List[Pivot]:
-    return zigzag(raw_pivots(bars, depth), atr, atr_mult)
+    z = zigzag(raw_pivots(bars, depth), atr, atr_mult)
+    dev = developing_pivot(bars, z, atr, atr_mult)
+    if dev is not None:
+        z.append(dev)                              # live leg extreme -> structure/Fib track it
+    return z
