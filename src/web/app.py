@@ -173,20 +173,39 @@ def chart_api(symbol: str, tf: str = "1h"):
     swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"],
                "provisional": bool(s.get("provisional"))}
               for s in (sf.get("swings") or []) if s.get("time")]
-    px = raw[-1][4]                              # urutkan zona per KEDEKATAN ke harga (paling tradeable dulu)
+    px = raw[-1][4]
+    # GABUNG FVG searah yg tumpang-tindih/menempel -> satu zona (hilangkan tumpukan penanda ganda)
+    fvgs.sort(key=lambda f: (f["direction"], f["bottom"]))
+    merged = []
+    for f in fvgs:
+        m = merged[-1] if merged else None
+        if m and m["direction"] == f["direction"] and f["bottom"] <= m["top"]:
+            m["top"], m["bottom"] = max(m["top"], f["top"]), min(m["bottom"], f["bottom"])
+            m["from"] = min(m["from"], f["from"])
+            if f.get("state") == "unmitigated":
+                m["state"] = "unmitigated"
+        else:
+            merged.append(dict(f))
+    fvgs = merged
     near = lambda z: 0.0 if z["bottom"] <= px <= z["top"] else min(abs(px - z["top"]), abs(px - z["bottom"]))
-    fvgs.sort(key=near)
+    fvgs.sort(key=near)                          # zona terdekat harga dulu (paling tradeable)
     obs.sort(key=near)
+    # LIKUIDITAS: EQH/EQL pool (jarang) + BSL/SSL = swing high di atas / swing low di bawah harga
+    highs_above = sorted(s["price"] for s in swings if s["kind"] == "high" and s["price"] > px)
+    lows_below = sorted((s["price"] for s in swings if s["kind"] == "low" and s["price"] < px), reverse=True)
+    bsl = highs_above[0] if highs_above else None    # buy-side liquidity terdekat (stops di atas high)
+    ssl = lows_below[0] if lows_below else None       # sell-side liquidity terdekat (stops di bawah low)
     fib = (sf.get("active_leg") or {}).get("fib") or {}
     struct = sf.get("structure") or {}
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,
-        "fvg": fvgs[:6], "order_blocks": obs[:4], "swings": swings[-8:],
+        "fvg": fvgs[:4], "order_blocks": obs[:4], "swings": swings[-8:],
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction")},
-        "liquidity": {"sweep": sf.get("liquidity_sweep"), "pools": sf.get("liquidity_pools")},
+        "liquidity": {"sweep": sf.get("liquidity_sweep"), "pools": sf.get("liquidity_pools"),
+                      "bsl": bsl, "ssl": ssl},
         "fib_extensions": sf.get("fib_extensions"),
         "structure": {"trend": struct.get("trend"), "event": struct.get("event"),
                       "event_direction": struct.get("event_direction"),

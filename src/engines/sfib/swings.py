@@ -76,39 +76,43 @@ def zigzag(pivots: Sequence[Pivot], atr: Sequence[float], atr_mult: float = 0.5)
     return z
 
 
-def developing_pivot(bars: Sequence[Bar], swings: Sequence[Pivot], atr: Sequence[float],
-                     atr_mult: float = 0.5) -> Pivot | None:
-    """Provisional extreme of the CURRENT (still-unconfirmed) leg since the last confirmed pivot.
+def developing_pivots(bars: Sequence[Bar], swings: Sequence[Pivot], atr: Sequence[float],
+                      atr_mult: float = 0.5) -> List[Pivot]:
+    """CHAIN of provisional alternating extremes for the tail (after the last confirmed pivot).
 
-    Fractal pivots lag confirmation by `depth` bars, so the live leg's extreme (e.g. a fresh swing
-    low made 2 bars ago) is never a confirmed pivot yet — leaving structure/Fib anchored to a STALE
-    swing. This returns the running extreme of the leg after the last confirmed pivot (a running low
-    when the last pivot was a high, else a running high), IF the move is structurally significant
-    (>= atr_mult x ATR). Honest: uses only printed bars, no look-ahead. Marked `provisional=True`.
+    Fractal pivots lag confirmation by `depth` bars, so the live leg(s) never confirm — leaving
+    structure/Fib anchored to a STALE swing. This greedily walks the tail: from the current pivot take
+    the running extreme of the OPPOSITE kind; if that move is structurally significant (>= atr_mult x
+    ATR) add it as a provisional pivot and continue from there. Walking the chain (not a single step)
+    captures multi-leg tails — e.g. high -> developing low -> developing high after a rally that broke
+    back above the last swing high — so the active Fib leg matches where price ACTUALLY is, not a leg
+    price has already left behind. Honest: uses only printed bars, no look-ahead. `provisional=True`.
     """
+    out: List[Pivot] = []
     if not swings or not bars:
-        return None
-    last = swings[-1]
+        return out
+    current = swings[-1]
     n = len(bars)
-    start = last.index + 1
-    if start >= n:
-        return None
-    rng = range(start, n)
-    if last.kind == "high":                       # current leg is DOWN -> track running low
-        ext_i = min(rng, key=lambda i: bars[i].low)
-        ext_p, kind, moved = bars[ext_i].low, "low", last.price - bars[ext_i].low
-    else:                                          # current leg is UP -> track running high
-        ext_i = max(rng, key=lambda i: bars[i].high)
-        ext_p, kind, moved = bars[ext_i].high, "high", bars[ext_i].high - last.price
-    a = atr[ext_i] if 0 <= ext_i < len(atr) else (atr[-1] if atr else 0.0)
-    if moved < atr_mult * a:                       # leg not significant yet -> no provisional swing
-        return None
-    return Pivot(ext_i, bars[ext_i].time, ext_p, kind, provisional=True)
+    guard = 0
+    while current.index + 1 < n and guard < 8:
+        guard += 1
+        rng = range(current.index + 1, n)
+        if current.kind == "high":                 # look for the running LOW that follows a high
+            ext_i = min(rng, key=lambda i: bars[i].low)
+            ext_p, kind, moved = bars[ext_i].low, "low", current.price - bars[ext_i].low
+        else:                                      # look for the running HIGH that follows a low
+            ext_i = max(rng, key=lambda i: bars[i].high)
+            ext_p, kind, moved = bars[ext_i].high, "high", bars[ext_i].high - current.price
+        a = atr[ext_i] if 0 <= ext_i < len(atr) else (atr[-1] if atr else 0.0)
+        if moved < atr_mult * a:                   # remaining tail move not significant -> stop
+            break
+        piv = Pivot(ext_i, bars[ext_i].time, ext_p, kind, provisional=True)
+        out.append(piv)
+        current = piv
+    return out
 
 
 def significant_swings(bars, atr, depth=10, atr_mult=0.5) -> List[Pivot]:
     z = zigzag(raw_pivots(bars, depth), atr, atr_mult)
-    dev = developing_pivot(bars, z, atr, atr_mult)
-    if dev is not None:
-        z.append(dev)                              # live leg extreme -> structure/Fib track it
+    z.extend(developing_pivots(bars, z, atr, atr_mult))   # live leg(s) -> structure/Fib track them
     return z

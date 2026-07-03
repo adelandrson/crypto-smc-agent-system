@@ -294,8 +294,10 @@ function _applyOverlays() {
   if (_ind.struct) { pl(st.last_swing_high, "rgba(239,83,80,.5)", "SwH"); pl(st.last_swing_low, "rgba(38,166,154,.5)", "SwL"); }
   if (_ind.liq) {
     const lq = d.liquidity || {}, pools = lq.pools || {};
-    (pools.eqh || []).forEach(p => pl(p, "rgba(255,152,0,.6)", "EQH"));
-    (pools.eql || []).forEach(p => pl(p, "rgba(255,152,0,.6)", "EQL"));
+    if (lq.bsl != null) pl(lq.bsl, "rgba(255,152,0,.55)", "BSL");   // buy-side liq (di atas)
+    if (lq.ssl != null) pl(lq.ssl, "rgba(255,152,0,.55)", "SSL");   // sell-side liq (di bawah)
+    (pools.eqh || []).forEach(p => pl(p, "#ff9800", "EQH", 0));
+    (pools.eql || []).forEach(p => pl(p, "#ff9800", "EQL", 0));
     if (lq.sweep && lq.sweep.swept && lq.sweep.level != null) pl(lq.sweep.level, "#ff5252", "SWEEP", 0);
   }
   cs.setMarkers(_ind.struct ? (d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.provisional ? "circle" : (s.kind === "high" ? "arrowDown" : "arrowUp"), text: (s.kind === "high" ? "H" : "L") + (s.provisional ? "?" : "") })) : []);
@@ -338,6 +340,8 @@ function _renderIndicatorPanel(d) {
   const lastSw = (d.swings || []).slice(-1)[0], provKind = lastSw && lastSw.provisional ? lastSw.kind : null;
   const stL = [st.last_swing_high != null ? `SwH ${_cp(st.last_swing_high)}${provKind === "high" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.last_swing_low != null ? `SwL ${_cp(st.last_swing_low)}${provKind === "low" ? ' <span class="muted">berjalan</span>' : ""}` : null, st.event ? esc(String(st.event).toUpperCase()) : null].filter(Boolean);
   const liqL = [];
+  if (lq.bsl != null) liqL.push(`BSL ${_cp(lq.bsl)}`);
+  if (lq.ssl != null) liqL.push(`SSL ${_cp(lq.ssl)}`);
   (pools.eqh || []).forEach(p => liqL.push(`EQH ${_cp(p)}`));
   (pools.eql || []).forEach(p => liqL.push(`EQL ${_cp(p)}`));
   if (lq.sweep && lq.sweep.swept) liqL.push(`⚡ sweep ${esc(lq.sweep.type || "")} @ ${_cp(lq.sweep.level)}`);
