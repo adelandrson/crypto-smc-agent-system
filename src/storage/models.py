@@ -88,6 +88,10 @@ class DryRunTrade(Base):
     margin_usd: Mapped[float] = mapped_column(Float)                    # modal terkomit (notional/leverage, capped)
     tps: Mapped[str] = mapped_column(Text)                              # JSON: rencana TP bertahap (risk.tp_targets)
     trail: Mapped[float | None] = mapped_column(Float)                  # fraksi trailing AKTIF (TP terakhir yg set mode=trail menang — sama spt Position.trail sumber)
+    # ── funding perp (simulasi biaya nyata, dari paper/broker.py sumber) ──
+    funding_rate: Mapped[float | None] = mapped_column(Float)           # rate 8-jam saat entry (weighted_funding)
+    funding_paid_usd: Mapped[float] = mapped_column(Float, default=0.0) # akumulasi PnL funding (neg=biaya, pos=kredit)
+    funding_last_ts: Mapped[datetime | None] = mapped_column(UTCDateTime())  # waktu akrual funding terakhir
     # ── snapshot confluence saat entry (audit) ──
     full_score: Mapped[int] = mapped_column(Integer)                    # -4..+4
     zone: Mapped[str] = mapped_column(String(16))                       # premium | discount | equilibrium

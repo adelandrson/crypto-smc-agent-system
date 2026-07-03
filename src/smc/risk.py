@@ -63,6 +63,17 @@ def limit_entry(direction: int, price: float, nearest_fvg: Optional[dict],
     return min(cand, price * (1 + max_pullback))
 
 
+FUNDING_INTERVAL_H = 8.0   # perp: funding di-settle tiap 8 jam (00/08/16 UTC)
+
+
+def funding_fee(notional: float, funding_rate, direction: int, hours: float) -> float:
+    """Biaya funding perp (aproksimasi dry-run, akrual proporsional per periode 8 jam) — cermin
+    paper/risk.py sumber. LONG bayar saat rate>0 (SHORT terima). Return PnL funding (neg=biaya)."""
+    if not funding_rate or hours <= 0 or not notional:
+        return 0.0
+    return -direction * abs(notional) * funding_rate * (hours / FUNDING_INTERVAL_H)
+
+
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:
     """Base-asset qty so that hitting SL loses exactly risk% of equity."""
     if entry <= 0 or sl <= 0:

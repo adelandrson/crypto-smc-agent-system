@@ -271,6 +271,11 @@ function _posCard(p) {
       <b class="${pnlCls}">${p.realized_pnl_usd >= 0 ? "+" : ""}$${(p.realized_pnl_usd || 0).toFixed(2)}${p.r_multiple != null ? ` (${p.r_multiple > 0 ? "+" : ""}${p.r_multiple}R)` : ""}</b></div>
     <div class="ac-grid"><div><span>Entry</span><b>${fmtPrice(p.entry)}</b></div><div><span>SL</span><b>${fmtPrice(p.sl)}</b></div>
       <div><span>Qty sisa</span><b>${fmtQty(p.qty_remaining)} / ${fmtQty(p.original_qty)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
+    <div class="ac-grid" style="margin-top:6px">
+      <div><span>Margin (dari equity)</span><b>$${(p.margin_usd || 0).toFixed(2)}${p.margin_pct != null ? ` · ${p.margin_pct}%` : ""}</b></div>
+      <div><span>Notional (×${p.leverage})</span><b>$${(p.notional_usd || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}${p.notional_pct != null ? ` · ${p.notional_pct}%` : ""}</b></div>
+      <div><span>Funding rate (8j)</span><b>${p.funding_rate != null ? (p.funding_rate * 100).toFixed(4) + "%" : "—"}</b></div>
+      <div><span>Funding fee</span><b class="${(p.funding_paid_usd || 0) >= 0 ? "pos" : "neg"}">${(p.funding_paid_usd || 0) >= 0 ? "+" : ""}$${(p.funding_paid_usd || 0).toFixed(4)}</b></div></div>
     ${_tpLadder(p.tps, p.fills)}
   </div>`;
 }
@@ -282,6 +287,11 @@ function _pendingCard(p) {
     <div class="ac-grid"><div><span>Limit</span><b>${fmtPrice(p.entry)}</b></div>
       <div><span>Harga sinyal</span><b class="muted">${p.mark_price != null ? fmtPrice(p.mark_price) : "—"}</b></div>
       <div><span>SL</span><b>${fmtPrice(p.sl)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
+    <div class="ac-grid" style="margin-top:6px">
+      <div><span>Qty</span><b>${fmtQty(p.original_qty)}</b></div>
+      <div><span>Margin (dari equity)</span><b>$${(p.margin_usd || 0).toFixed(2)}${p.margin_pct != null ? ` · ${p.margin_pct}%` : ""}</b></div>
+      <div><span>Notional (×${p.leverage})</span><b>$${(p.notional_usd || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</b></div>
+      <div><span>Funding rate (8j)</span><b>${p.funding_rate != null ? (p.funding_rate * 100).toFixed(4) + "%" : "—"}</b></div></div>
     <div class="tp-labels" style="margin-top:6px"><span>Dipasang ${p.placed_ts ? new Date(p.placed_ts).toLocaleString() : ""}</span></div>
   </div>`;
 }

@@ -108,11 +108,22 @@ def agent_api():
             return [{"label": f.label, "price": f.price, "qty": f.qty, "pnl_usd": f.pnl_usd,
                      "ts": f.ts.isoformat() if f.ts else None} for f in fs]
 
+        eq_by_group = {g: (arena.equity(g, s) or arena.START_EQUITY) for g in ("scalp", "swing")}
+
         def _row(r):
+            eq = eq_by_group.get(r.group) or arena.START_EQUITY
+            notional = (r.entry or 0) * (r.original_qty or 0)      # eksposur = qty × harga (setelah leverage)
+            margin = r.margin_usd or 0                             # modal terkomit dari equity (notional/leverage)
             return {"id": r.id, "symbol": r.symbol, "group": r.group, "leg": r.leg,
                     "entry": r.entry, "sl": r.sl, "leverage": r.leverage, "mark_price": r.mark_price,
                     "original_qty": r.original_qty, "qty_remaining": r.qty_remaining,
-                    "risk_usd": r.risk_usd, "margin_usd": r.margin_usd,
+                    "risk_usd": r.risk_usd, "risk_frac": r.risk_frac, "margin_usd": r.margin_usd,
+                    "equity_ref": round(eq, 2),
+                    "margin_pct": round(margin / eq * 100, 3) if eq else None,       # % equity terkomit
+                    "notional_usd": round(notional, 2),                             # $ eksposur (setelah leverage)
+                    "notional_pct": round(notional / eq * 100, 2) if eq else None,  # % equity eksposur
+                    "funding_rate": r.funding_rate,
+                    "funding_paid_usd": round(r.funding_paid_usd or 0, 4),
                     "full_score": r.full_score, "zone": r.zone, "high_confluence": r.high_confluence,
                     "realized_pnl_usd": round(r.realized_pnl_usd or 0, 4), "outcome": r.outcome,
                     "r_multiple": r.r_multiple, "status": r.status,

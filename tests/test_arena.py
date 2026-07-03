@@ -232,3 +232,32 @@ def test_reset_wipes_trades_and_fills():
 def test_max_open_positions_is_four_for_both_styles():
     assert GROUPS["scalp"]["max_open"] == 4
     assert GROUPS["swing"]["max_open"] == 4
+
+
+def test_funding_fee_helper():
+    """risk.funding_fee: long bayar saat rate>0, short terima, proporsional 8 jam."""
+    from src.smc.risk import funding_fee
+    # notional 1000, rate 0.0001, 8 jam, long -> -0.10 (bayar)
+    assert round(funding_fee(1000, 0.0001, +1, 8.0), 4) == -0.1
+    assert round(funding_fee(1000, 0.0001, -1, 8.0), 4) == 0.1     # short terima
+    assert round(funding_fee(1000, 0.0001, +1, 4.0), 4) == -0.05   # 4 jam = separuh
+    assert funding_fee(1000, 0.0, +1, 8.0) == 0.0                  # rate 0 -> tak ada
+    assert funding_fee(1000, None, +1, 8.0) == 0.0                 # rate None -> tak ada
+
+
+def test_open_market_stores_funding_rate():
+    """open_market + place_pending menyimpan funding_rate; fill_pending set funding_last_ts."""
+    d = {"direction": 1, "entry": 100.0, "sl": 95.0, "qty": 1.0, "leverage": 10,
+         "risk_frac": 0.02, "risk_usd": 20.0, "margin_usd": 10.0, "tps": [], "full_score": 3,
+         "zone": "discount", "high_confluence": True, "order_type": "market"}
+    Mk = _mk_session()
+    with Mk() as s:
+        tr = arena.open_market(s, "swing", "BTC", d, mark=100.0, funding_rate=0.0002)
+        assert tr.funding_rate == 0.0002
+        assert tr.funding_last_ts is not None      # market -> akrual mulai seketika
+        assert tr.funding_paid_usd == 0.0
+        # pending: funding_rate tersimpan, tapi funding_last_ts belum (mulai saat fill)
+        tp = arena.place_pending(s, "swing", "ETH", dict(d, order_type="limit"), mark=100.0, funding_rate=0.0002)
+        assert tp.funding_rate == 0.0002 and tp.funding_last_ts is None
+        arena.fill_pending(s, tp)
+        assert tp.funding_last_ts is not None       # fill -> akrual mulai

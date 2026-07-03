@@ -19,7 +19,7 @@ from src.smc.binance_adapter import BinanceAdapter
 from src.smc.config_store import effective_groups
 from src.smc.decide import GROUPS, decide
 from src.smc.oi_tracker import OITracker
-from src.smc.risk import fmt_price
+from src.smc.risk import fmt_price, funding_fee
 from src.smc.sentiment import aggregate_sentiment
 from src.smc.session import session_ok
 from src.storage.db import SessionLocal, init_db
@@ -84,7 +84,8 @@ def universe_symbols(s, group: str = "scalp", limit: int = 200) -> list[str]:
 CANCEL_RUN = 0.02      # harga kabur >2% searah dari limit tanpa pullback -> batal (jangan chase)
 
 
-def place_pending(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
+def place_pending(s, group: str, symbol: str, d: dict, mark: float | None = None,
+                  funding_rate: float | None = None) -> DryRunTrade:
     """Pasang LIMIT order PENDING di harga d['entry'] (retest zona imbalance, dari
     risk.limit_entry). BELUM terisi, BELUM kena fee — menunggu harga menyentuh limit
     (lihat check_pending). Slot posisi (max_open) sudah terpakai sejak pending."""
@@ -101,7 +102,7 @@ def place_pending(s, group: str, symbol: str, d: dict, mark: float | None = None
         tps=json.dumps(d["tps"]), full_score=d["full_score"], zone=d["zone"],
         high_confluence=d["high_confluence"], fr_score=d.get("fr_score"),
         oi_score=d.get("oi_score"), lsr_score=d.get("lsr_score"),
-        realized_pnl_usd=0.0,
+        realized_pnl_usd=0.0, funding_rate=funding_rate, funding_paid_usd=0.0,
     )
     s.add(tr)
     s.commit()
@@ -114,6 +115,7 @@ def fill_pending(s, tr: DryRunTrade) -> str:
     fee = _fee(tr.entry, tr.qty_remaining)
     tr.status = "open"
     tr.entry_ts = _now()
+    tr.funding_last_ts = _now()      # akrual funding mulai saat POSISI terisi (bukan saat pending)
     tr.realized_pnl_usd = (tr.realized_pnl_usd or 0.0) - fee
     return f"{tr.symbol} LIMIT {tr.leg} terisi @ {fmt_price(tr.entry)}"
 
@@ -125,7 +127,8 @@ def cancel_pending(s, tr: DryRunTrade, reason: str) -> str:
     return f"{tr.symbol} LIMIT {tr.leg} batal — {reason}"
 
 
-def open_market(s, group: str, symbol: str, d: dict, mark: float | None = None) -> DryRunTrade:
+def open_market(s, group: str, symbol: str, d: dict, mark: float | None = None,
+                funding_rate: float | None = None) -> DryRunTrade:
     """Entry MARKET (order_type='market'): harga kini SUDAH di zona entry -> isi SEKETIKA di harga
     pasar dgn slippage TAKER (bukan menunggu pullback). status=open langsung, fee taker dipotong."""
     direction = d["direction"]
@@ -140,6 +143,7 @@ def open_market(s, group: str, symbol: str, d: dict, mark: float | None = None) 
         tps=json.dumps(d["tps"]), full_score=d["full_score"], zone=d["zone"],
         high_confluence=d["high_confluence"], fr_score=d.get("fr_score"),
         oi_score=d.get("oi_score"), lsr_score=d.get("lsr_score"), realized_pnl_usd=-fee,
+        funding_rate=funding_rate, funding_paid_usd=0.0, funding_last_ts=now,
     )
     s.add(tr)
     s.commit()
@@ -324,6 +328,15 @@ def check_open(cli=None) -> list[str]:
                 if not bars_fetched or len(bars_fetched) < 2:
                     continue
                 last = bars_fetched[-2]             # candle CLOSED terakhir (bukan forming) — no repaint
+                # akrual biaya FUNDING perp sejak akrual terakhir (biaya nyata -> equity, spt broker sumber)
+                if tr.funding_rate and tr.funding_last_ts:
+                    hrs = (_now() - tr.funding_last_ts).total_seconds() / 3600.0
+                    if hrs > 0:
+                        fee = funding_fee(tr.entry * tr.qty_remaining, tr.funding_rate,
+                                          1 if tr.leg == "long" else -1, hrs)
+                        tr.funding_paid_usd = (tr.funding_paid_usd or 0.0) + fee
+                        tr.realized_pnl_usd = (tr.realized_pnl_usd or 0.0) + fee
+                        tr.funding_last_ts = _now()
                 events += manage_position(s, tr, last[2], last[3], last[4])
                 s.commit()
         except Exception as e:  # noqa: BLE001
@@ -399,10 +412,11 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             _snapshot(s, group, sym, d)
             # slot dari active (pending+open). Entry FLEKSIBEL: market=isi seketika, limit=pending
             if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:
+                fr = sent.get("weighted_funding")
                 if d.get("order_type") == "market":
-                    open_market(s, group, sym, d, mark=mark_price)
+                    open_market(s, group, sym, d, mark=mark_price, funding_rate=fr)
                 else:
-                    place_pending(s, group, sym, d, mark=mark_price)
+                    place_pending(s, group, sym, d, mark=mark_price, funding_rate=fr)
                 placed += 1
             s.commit()
     return placed
