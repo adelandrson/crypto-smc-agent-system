@@ -353,28 +353,31 @@ def check_open(cli=None) -> list[str]:
 _PUMP_CACHE: dict = {}     # {sym: (bar_ts_1d, verdict)} — refresh saat candle 1D baru (pola lambat)
 
 
-def _pump_for(cli, sym: str, tier, mkt: str, min_rr: float = 2.5):
-    """Verdict anti crime-pump utk `sym` (hanya tier A/B/C) dari data 1D ~90 hari, di-cache per
-    candle harian. Defensif: None bila tier tinggi / gagal fetch."""
+def _pump_for(cli, sym: str, tier, mkt: str, min_rr: float = 2.5, spike_min: float = 15.0,
+              mcap_ceiling: float = 5e9, mcap=None):
+    """Verdict anti crime-pump utk `sym` (tier A/B/C). PUMP-macro dari data 1D ~90 hari (spike volume
+    vs baseline + mcap), distribusi lintas TF 1D>4h>1h>15m. Cache per candle 15m (fresh utk entry).
+    Defensif: None bila tier tinggi / gagal fetch."""
     if tier not in ("A", "B", "C"):
         return None
     try:
-        c4h = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)   # macro pump 30-42 hari
-        if not c4h or len(c4h) < 40:
+        m15 = cli.fetch_ohlcv(f"{sym}/USDT", "15m", limit=500, market_type=mkt)   # key cache (refresh 15m)
+        if not m15 or len(m15) < 40:
             return None
-        key = c4h[-1][0]
+        key = m15[-1][0]
         cached = _PUMP_CACHE.get(sym)
         if cached and cached[0] == key:
-            return cached[1]
-        tfs = []                                          # distribusi lintas TF: 1D>4h>1h>15m
-        for tf, lim, win in (("1d", 90, 6), ("4h", 250, 8), ("1h", 300, 18), ("15m", 500, 32)):
-            try:
-                cc = cli.fetch_ohlcv(f"{sym}/USDT", tf, limit=lim, market_type=mkt)
-                if cc and len(cc) >= max(10, win) + 1:
-                    tfs.append((tf, cc[:-1], win))        # buang candle berjalan
-            except Exception:  # noqa: BLE001
-                pass
-        verdict = pump_guard(c4h[:-1], tier, dist_tfs=tfs or None, min_rr=min_rr)
+            return cached[1]                              # cache hit -> hemat fetch 1D/4h/1h
+        d1 = cli.fetch_ohlcv(f"{sym}/USDT", "1d", limit=90, market_type=mkt)      # macro pump: spike 90 hari
+        if not d1 or len(d1) < 40:
+            return None
+        c4h = cli.fetch_ohlcv(f"{sym}/USDT", "4h", limit=250, market_type=mkt)
+        h1 = cli.fetch_ohlcv(f"{sym}/USDT", "1h", limit=300, market_type=mkt)
+        tfs = [(tf, cc[:-1], win) for tf, cc, win in                              # distribusi 1D>4h>1h>15m
+               (("1d", d1, 6), ("4h", c4h, 8), ("1h", h1, 18), ("15m", m15, 32))
+               if cc and len(cc) >= max(10, win) + 1]
+        verdict = pump_guard(d1[:-1], tier, dist_tfs=tfs or None, min_rr=min_rr,
+                             spike_min=spike_min, mcap=mcap, mcap_ceiling=mcap_ceiling)
         _PUMP_CACHE[sym] = (key, verdict)
         return verdict
     except Exception:  # noqa: BLE001
@@ -421,7 +424,9 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     with SessionLocal() as s:
         syms = symbols or universe_symbols(s, group=group)
         tcol = Token.swing_tier if group == "swing" else Token.scalp_tier
-        tier_map = {sy: ti for sy, ti in s.execute(select(Token.symbol, tcol)).all()}   # utk lapis anti-pump
+        tier_map, mcap_map = {}, {}                                        # utk lapis anti crime-pump
+        for sy, ti, mc in s.execute(select(Token.symbol, tcol, Token.market_cap)).all():
+            tier_map[sy] = ti; mcap_map[sy] = mc
     for sym in syms:
         try:
             candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type=mkt)
@@ -438,7 +443,9 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
         now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
         if not session_ok(now_dt, cfg["mode"], allow_asia=False):
             continue
-        pump = _pump_for(cli, sym, tier_map.get(sym), mkt, min_rr=cfg.get("pump_min_rr", 2.5))   # lapis anti crime-pump
+        pump = _pump_for(cli, sym, tier_map.get(sym), mkt, min_rr=cfg.get("pump_min_rr", 2.5),
+                         spike_min=cfg.get("pump_spike_min", 15.0), mcap_ceiling=cfg.get("pump_mcap_ceiling", 5e9),
+                         mcap=mcap_map.get(sym))   # lapis anti crime-pump (spike vol 90d + mcap)
         with SessionLocal() as s:
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
                 DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym,

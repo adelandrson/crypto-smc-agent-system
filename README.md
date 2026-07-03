@@ -145,11 +145,12 @@ mengubah rentang skor.
 - **Gerbang funding**: bila posisi akan **MEMBAYAR** funding yang tinggi (adverse), entry ditolak —
   ada dua ambang: **absolut** (> 0.1%/8j → tolak) dan **relatif** (estimasi biaya funding selama hold
   > 35% dari jarak profit ke TP1). Funding yang **DITERIMA** (menguntungkan posisi) tak pernah memblokir.
-- **Lapis anti crime-pump/dump** (koin **tier A ke bawah**, mcap/volume rendah): pump-macro dideteksi
-  di **4h (~30–42 hari baseline)**, sedangkan **distribusi-final dinilai di 1h** (sideways-top &
-  wick-rejection paling jelas di 1h; sering ter-smooth di 4h). Deteksi manipulasi — volume per-candle
-  sebelumnya konsisten sangat
-  kecil (baseline), lalu **spike volume** mengangkat harga tinggi (pump artifisial). Aksi:
+- **Lapis anti crime-pump/dump** (koin **tier A ke bawah**): pembeda utama (riset data nyata) =
+  **rasio spike volume 90 hari** = `peak_$vol / median_baseline_$vol`. Rally ORGANIK/legit (good-news
+  & adopsi: Pyth/Near/Aave/HBAR ≤~**10×**) vs **MANIPULASI** (Manta/LAB/Rave ≥~**30×**) — ambang **15×**
+  (pemisahan bersih) + safety mcap-ceiling $5B (koin raksasa sulit dimanipulasi). Pump-macro dinilai di
+  **1D (90 hari)**, distribusi-final lintas TF **1D→4h→1h→15m** (yang cepat spt Manta ketangkap di TF
+  halus). Aksi:
   - **BLOKIR LONG** selama harga masih di puncak pump.
   - **SHORT hanya bila DISTRIBUSI FINAL** — dinilai **multi-timeframe (1D→4h→1h→15m)** karena crime-pump
     ada yang lambat (LAB/Rave/OM) & sangat cepat (Manta): TF halus menangkap yang cepat lebih awal.

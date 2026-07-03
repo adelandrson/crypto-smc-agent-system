@@ -283,7 +283,7 @@ def test_pump_guard_blocks_long_gates_short():
     C = []; t = 0
     for _ in range(30):
         C.append([t, 10.0, 10.1, 9.9, 10.0, 100.0]); t += 86400000
-    C.append([t, 10.0, 15.0, 10.0, 14.0, 1000.0]); t += 86400000        # PUMP -> peak wick 15
+    C.append([t, 10.0, 15.0, 10.0, 14.0, 2000.0]); t += 86400000        # PUMP: $vol 28x baseline -> peak wick 15
     sw = [650, 680, 900, 640, 660, 630, 650, 620]                       # local-peak vol=900 (bukan global-max)
     for k, vol in enumerate(sw):
         c = 13.8 if k == len(sw) - 1 else 14.0
@@ -292,6 +292,9 @@ def test_pump_guard_blocks_long_gates_short():
     v = pump_guard(C, "B")
     assert v["is_pump"] and v["block_long"] and v["short_ok"]
     assert abs(v["short_sl"] - 14.9) < 0.01 and abs(v["short_tp"] - 10.1) < 0.05   # SL = local sideways wick
+    assert v["spike_ratio"] >= 15                       # gate volume: spike $vol >= 15x baseline 90h
+    assert pump_guard(C, "B", spike_min=50)["is_pump"] is False   # spike < 50 -> rally organik
+    assert pump_guard(C, "B", mcap=1e10)["is_pump"] is False      # mcap > $5B -> bukan crime-pump
     assert v["order_type"] == "market" and v["rr"] >= 3.0 and abs(v["short_entry"] - 13.8) < 0.01
     # volume sideways SAMA (tak ada local-peak) -> distribusi belum final
     for i in range(31, len(C)):

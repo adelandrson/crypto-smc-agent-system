@@ -135,8 +135,8 @@ def _dist_short(dc, win, pre, tp, wick_min, sideways_band, local_mult, min_rr, _
     return {"sl": sl, "entry": cur, "order": "market", "rr": rr, "sideways_high": sl}
 
 
-def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=None, min_rr: float = 2.5,
-               spike_mult: float = 6.0, pump_min: float = 0.30, wick_min: float = 0.45,
+def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=None, min_rr: float = 2.5, spike_min: float = 15.0, mcap=None,
+               mcap_ceiling: float = 5e9, pump_min: float = 0.30, wick_min: float = 0.45,
                base_quantile: float = 0.7, block_above: float = 0.15, sideways_win: int = 8,
                sideways_band: float = 0.12, local_mult: float = 1.15, tp_margin: float = 0.01) -> dict:
     """Deteksi 'crime pump/dump' koin TIER RENDAH (A/B/C) — deterministik, MULTI-TIMEFRAME.
@@ -155,7 +155,7 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=No
     order_type/dist_tf/rr/pump_pct/reason."""
     out = {"is_pump": False, "block_long": False, "short_ok": False, "pre_pump_price": None,
            "peak_price": None, "short_sl": None, "short_tp": None, "short_entry": None,
-           "order_type": None, "dist_tf": None, "rr": None, "pump_pct": None, "reason": ""}
+           "order_type": None, "dist_tf": None, "rr": None, "pump_pct": None, "spike_ratio": None, "reason": ""}
     if tier not in ("A", "B", "C") or not candles or len(candles) < 30:
         return out
 
@@ -164,10 +164,20 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=No
         return s[len(s) // 2] if s else 0.0
 
     h = [c[2] for c in candles]; cl = [c[4] for c in candles]; v = [c[5] for c in candles]
-    base = _med(sorted(v)[:max(1, int(len(v) * base_quantile))])
+    dv = [cl[i] * v[i] for i in range(len(candles))]        # $ volume harian (close x base-vol)
+    base = _med(sorted(dv)[:max(1, int(len(dv) * base_quantile))])   # baseline $vol tenang (kuantil bawah)
     if base <= 0:
         return out
-    spikes = [i for i, x in enumerate(v) if x > base * spike_mult]
+    spike_ratio = max(dv) / base                            # rasio spike vs baseline 90 hari
+    out["spike_ratio"] = round(spike_ratio, 1)
+    # GATE VOLUME (riset 90d): rally organik/legit (Pyth/Near/Aave/HBAR) <=~10x; MANIPULASI
+    # (Manta/LAB/Rave) >=~30x. spike_ratio < spike_min -> kenaikan WAJAR/organik, BUKAN crime-pump.
+    if spike_ratio < spike_min:
+        return out
+    # GATE MCAP: koin sangat besar sulit dimanipulasi (safety large-cap false-positive)
+    if mcap and mcap > mcap_ceiling:
+        return out
+    spikes = [i for i, x in enumerate(dv) if x > base * spike_min]
     if not spikes:
         return out
     s0 = spikes[0]
@@ -183,7 +193,7 @@ def pump_guard(candles, tier, dist_candles=None, dist_win: int = 18, dist_tfs=No
     out["short_tp"] = tp
     out["block_long"] = cl[-1] > pre * (1 + block_above)      # harga masih di puncak pump -> jangan LONG
     out["reason"] = (f"crime-pump tier {tier}: +{pump_pct * 100:.0f}% dari {pre:.6g} "
-                     f"(spike volume {len(spikes)}× > {spike_mult:.0f}×baseline)")
+                     f"(spike vol {spike_ratio:.0f}x baseline 90h vs threshold {spike_min:.0f}x)")
 
     tfs = dist_tfs or ([("dist", dist_candles, dist_win)] if dist_candles else
                        [("macro", candles, sideways_win)])
