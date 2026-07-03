@@ -23,7 +23,10 @@ Leverage          : scalp 15x-30x · swing 8x-15x        ← BEDA dari default s
 Max posisi        : 4 per gaya (scalp DAN swing masing-masing) ← naik dari default sumber (3)
 Margin cap        : ~3% ekuitas (scalp) · ~7% ekuitas (swing) — cegah over-commit di leverage tinggi
 Confluence gate   : |full_score| >= 2 (FVG+Fib+OI+FR) — TAK DIUBAH dari metodologi sumber
-R:R TP bertahap   : scalp 1.5R/2.5R/4R (50/30/20%) · swing 1.5R/2.5R/4R/6R+moonbag (25/25/25/15/10%)
+TP                : scalp SATU TP tutup 100% di 2R (main cepat) · swing 1-3 TP by Volatility State+ATR
+                    (fraksi 100 / 50-50 / 40-35-25); LEVEL dari STRUKTUR (pool likuiditas/opposing OB/Fib ext)
+Entry             : FLEKSIBEL — harga di zona (FVG/OB/OTE)=MARKET; di luar=LIMIT retest zona
+Booster A+        : liquidity sweep · CVD per-candle divergence · MTF divergence · RSI quality 0-100
                     — TAK DIUBAH dari metodologi sumber
 ```
 
@@ -38,7 +41,8 @@ Sumber            : CoinMarketCap listings/latest, mcap >= $300,000,000
 Exclude           : stablecoin (tag+denylist), tokenized-gold ("GOLD index"), wrapped/liquid-
                     staking, derivative denylist — sama persis dgn crypto-trader-agent-system
 Syarat tradable   : harus listed Binance PERPETUAL/USDT (data & simulasi dry-run keduanya Binance)
-Tier              : S(>=$1B vol24h) / A(>=$200M) / B(>=$50M) / C(>=$10M) — heuristik awal, tunable
+Tier              : TERPISAH per gaya (rank-percentile → kuartil S/A/B/C): scalp=0.4·mcap+0.6·vol ·
+                    swing=0.6·mcap+0.4·vol (mcap≥$300M, tradable Binance perp, refresh 24 jam)
                     (bandingkan dgn metodologi sumber: cuma 5-10 pasangan tetap)
 ```
 

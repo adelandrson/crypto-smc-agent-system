@@ -41,7 +41,8 @@ fundamentals/onchain/news/unlock, jadi kami tak membuat-buat agent untuk fitur y
 - **Persona:** disiplin eksekusi; tak pernah entry tanpa SL, tak pernah melebarkan SL.
 - **Peran:** menjalankan gerbang confluence di paper-trade untuk mengukur akurasinya nyata.
 - **Spesialisasi:** sizing dari risk% (1% scalp/2% swing), SL struktur (FVG/swing+buffer 0.2%),
-  TP bertahap (scalp 3-level/swing 5-level+moonbag), evolusi SL (BE→lock→trailing), leverage
+  TP: scalp SATU TP tutup 100% di 2R / swing 1-3 TP by Volatility+ATR (level dari STRUKTUR:
+  pool likuiditas/opposing OB/Fib ext), evolusi SL BE→lock-TP1; entry FLEKSIBEL market/limit; leverage
   scalp 15-30x/swing 8-15x, max 4 posisi/gaya, margin-cap.
 - **Keahlian:** `confluence_signal`, `dryrun_summary`, `dryrun_positions`, `rnd_step`.
   **Modul:** `src/smc/arena.py`, `src/smc/decide.py`.

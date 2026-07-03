@@ -48,7 +48,7 @@ Di luar pagar mana pun → **jangan buka posisi**, catat alasan skip di SignalSn
 PRA-ENTRY   : [ ] confluence lengkap  [ ] |score|>=2  [ ] SL & size dihitung  [ ] zona benar
 ENTRY       : [ ] fill disimulasikan (slippage+fee)  [ ] tercatat DryRunTrade
 KELOLA      : [ ] SL evolve sesuai TP yg kena (BE→lock→trailing)  [ ] fill tercatat DryRunFill
-EXIT        : [ ] sesuai rencana (TP penuh/SL/moonbag)  [ ] r_multiple & outcome tercatat
+EXIT        : [ ] sesuai rencana (TP/SL/limit-canceled)  [ ] r_multiple & outcome tercatat
 ```
 
 ---
@@ -71,7 +71,7 @@ EXIT        : [ ] sesuai rencana (TP penuh/SL/moonbag)  [ ] r_multiple & outcome
 
 ### Backlog
 - [ ] Kalibrasi ulang threshold tier S/A/B/C dari data volume riil setelah beberapa minggu
-- [ ] Pertimbangkan multi-exchange (Bybit/OKX) untuk data & consensus (saat ini Binance-only)
+- [ ] Venue eksekusi = pilihan user (Binance/Bybit/Hyperliquid, lihat sumber ROADMAP.md §4b); data web saat ini Binance-only
 
 ### Selesai
 - [x] Port metodologi confluence (FVG+Fib+OB+struktur+OI+FR+LSR+momentum) — verbatim
