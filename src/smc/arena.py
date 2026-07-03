@@ -408,7 +408,8 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
                 continue
             eq = equity(group, s)
             oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), mark_price)
-            d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0))
+            d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0),
+                       funding_rate=sent.get("weighted_funding", 0.0))
             _snapshot(s, group, sym, d)
             # slot dari active (pending+open). Entry FLEKSIBEL: market=isi seketika, limit=pending
             if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:

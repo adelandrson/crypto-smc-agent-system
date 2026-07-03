@@ -74,6 +74,30 @@ def funding_fee(notional: float, funding_rate, direction: int, hours: float) -> 
     return -direction * abs(notional) * funding_rate * (hours / FUNDING_INTERVAL_H)
 
 
+_EST_FUNDING_PERIODS = {"scalp": 1, "swing": 6}   # estimasi periode 8j yg dilewati selama hold
+
+
+def funding_gate(direction: int, funding_rate, entry: float, tp_price, mode: str = "swing",
+                 max_pay_8h: float = 0.001, max_profit_frac: float = 0.35):
+    """Tolak entry bila funding yg DIBAYAR (adverse) akan menggerus PnL — cermin paper/risk.py sumber.
+    Funding yg DITERIMA tak pernah memblokir. (1) absolut: adverse >max_pay_8h -> tolak; (2) relatif:
+    estimasi biaya funding atas hold > max_profit_frac dari jarak profit ke TP1 -> tolak.
+    Return (ok, pay_rate, cost_frac)."""
+    rate = funding_rate or 0.0
+    pay_rate = max(0.0, direction * rate)
+    if pay_rate <= 0:
+        return True, 0.0, 0.0
+    if pay_rate > max_pay_8h:
+        return False, pay_rate, None
+    if tp_price and entry:
+        profit_frac = abs(tp_price - entry) / entry
+        if profit_frac > 0:
+            frac = (pay_rate * _EST_FUNDING_PERIODS.get(mode, 4)) / profit_frac
+            if frac > max_profit_frac:
+                return False, pay_rate, frac
+    return True, pay_rate, 0.0
+
+
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:
     """Base-asset qty so that hitting SL loses exactly risk% of equity."""
     if entry <= 0 or sl <= 0:

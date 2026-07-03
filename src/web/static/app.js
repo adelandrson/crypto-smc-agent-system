@@ -20,7 +20,8 @@ tabs.forEach(b => b.onclick = () => {
   if (b.dataset.tab === "admin") initAdmin();
   if (b.dataset.tab !== "agent") stopAgentPoll();
 });
-const AGENT_POLL_MS = 15000;
+const AGENT_POLL_MS = 1000;   // refresh dry-run tiap 1 dtk (harga terkini di-cache 3s server-side;
+                              // monitor menjalankan step tiap 20s — jadi fill/funding muncul otomatis)
 let _agentTimer = null, _agentLive = true;
 function startAgentPoll() { stopAgentPoll(); if (_agentLive) _agentTimer = setInterval(() => loadAgent(true), AGENT_POLL_MS); }
 function stopAgentPoll() { if (_agentTimer) { clearInterval(_agentTimer); _agentTimer = null; } }
@@ -272,12 +273,27 @@ function _posCard(p) {
     <div class="ac-grid"><div><span>Entry</span><b>${fmtPrice(p.entry)}</b></div><div><span>SL</span><b>${fmtPrice(p.sl)}</b></div>
       <div><span>Qty sisa</span><b>${fmtQty(p.qty_remaining)} / ${fmtQty(p.original_qty)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
     <div class="ac-grid" style="margin-top:6px">
+      <div><span>Harga terkini</span><b>${p.current_price != null ? fmtPrice(p.current_price) : "—"}${p.price_move_pct != null ? ` <span class="${p.price_move_pct >= 0 ? "pos" : "neg"}" style="font-size:11px">(${p.price_move_pct >= 0 ? "+" : ""}${p.price_move_pct}%)</span>` : ""}</b></div>
+      <div><span>PnL berjalan (unreal.)</span><b class="${(p.unrealized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">${p.unrealized_pnl_usd != null ? `${p.unrealized_pnl_usd >= 0 ? "+" : ""}$${p.unrealized_pnl_usd.toFixed(2)}${p.unrealized_pct != null ? ` (${p.unrealized_pct >= 0 ? "+" : ""}${p.unrealized_pct}%)` : ""}` : "—"}</b></div>
       <div><span>Margin (dari equity)</span><b>$${(p.margin_usd || 0).toFixed(2)}${p.margin_pct != null ? ` · ${p.margin_pct}%` : ""}</b></div>
       <div><span>Notional (×${p.leverage})</span><b>$${(p.notional_usd || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}${p.notional_pct != null ? ` · ${p.notional_pct}%` : ""}</b></div>
       <div><span>Funding rate (8j)</span><b>${p.funding_rate != null ? (p.funding_rate * 100).toFixed(4) + "%" : "—"}</b></div>
       <div><span>Funding fee</span><b class="${(p.funding_paid_usd || 0) >= 0 ? "pos" : "neg"}">${(p.funding_paid_usd || 0) >= 0 ? "+" : ""}$${(p.funding_paid_usd || 0).toFixed(4)}</b></div></div>
     ${_tpLadder(p.tps, p.fills)}
+    ${_tpPrices(p)}
   </div>`;
+}
+function _tpPrices(p) {
+  if (!p.tps || !p.tps.length) return "";
+  const filled = new Set((p.fills || []).map(f => f.label));
+  const dir = p.leg === "long" ? 1 : -1;
+  const rows = p.tps.map(t => {
+    const done = filled.has(t.label);
+    const mv = (t.price != null && p.entry) ? ((t.price - p.entry) / p.entry * dir * 100) : null;
+    return `<div class="tpp-row${done ? " done" : ""}"><span>${done ? "✓" : "◦"} ${esc(t.label)} · ${(t.frac * 100).toFixed(0)}%</span>
+      <b>${t.price != null ? fmtPrice(t.price) : "—"}${mv != null ? ` <span class="muted" style="font-weight:400">(+${mv.toFixed(1)}%)</span>` : ""}</b></div>`;
+  }).join("");
+  return `<div class="tpp"><div class="tpp-row hdr"><span>Entry ${fmtPrice(p.entry)}</span><b>SL ${fmtPrice(p.sl)}</b></div>${rows}</div>`;
 }
 function _pendingCard(p) {
   const dir = p.leg === "long" ? "LONG" : "SHORT";
@@ -285,7 +301,7 @@ function _pendingCard(p) {
     <div class="pos-head"><span class="pos-sym">${esc(p.symbol)} <span class="muted">${esc(p.group)} · ${dir} · ${p.leverage}x</span></span>
       <span class="pending-badge">◷ LIMIT menunggu</span></div>
     <div class="ac-grid"><div><span>Limit</span><b>${fmtPrice(p.entry)}</b></div>
-      <div><span>Harga sinyal</span><b class="muted">${p.mark_price != null ? fmtPrice(p.mark_price) : "—"}</b></div>
+      <div><span>Harga terkini</span><b>${p.current_price != null ? fmtPrice(p.current_price) : (p.mark_price != null ? fmtPrice(p.mark_price) : "—")}${p.current_price != null && p.entry ? ` <span class="muted" style="font-size:11px">(${(Math.abs(p.current_price - p.entry) / p.entry * 100).toFixed(2)}% ke limit)</span>` : ""}</b></div>
       <div><span>SL</span><b>${fmtPrice(p.sl)}</b></div><div><span>Score</span><b>${p.full_score}</b></div></div>
     <div class="ac-grid" style="margin-top:6px">
       <div><span>Qty</span><b>${fmtQty(p.original_qty)}</b></div>

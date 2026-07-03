@@ -63,6 +63,9 @@ GROUP_SPEC = {
     "pending_ttl_h": ("int", 1, 720),
     "tf": ("choice", ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"]),
     "candle_limit": ("int", 60, 500),
+    # funding gate — hindari funding tinggi yg menggerus PnL (agen/admin bisa longgar/ketat)
+    "funding_max_pay_8h": ("float", 0.0001, 0.02),    # adverse funding/8j di atas ini -> tolak (0.01%..2%)
+    "funding_max_profit_frac": ("float", 0.05, 1.0),  # funding boleh makan max X dari target profit
 }
 
 

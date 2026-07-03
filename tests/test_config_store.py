@@ -45,7 +45,7 @@ def test_effective_groups_injects_globals(tmp_path, monkeypatch):
     eff = config_store.effective_groups()
     assert eff["scalp"]["min_abs_score"] == 3 and eff["swing"]["min_abs_score"] == 3
     # default GROUPS tetap ada
-    assert eff["scalp"]["risk_pct"] == 0.01 and eff["swing"]["tf"] == "4h"
+    assert eff["scalp"]["risk_pct"] == 0.005 and eff["swing"]["tf"] == "4h"
 
 
 def test_reset(tmp_path, monkeypatch):

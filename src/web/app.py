@@ -91,9 +91,32 @@ def analyze_api(symbol: str):
 
 
 # ── Agent dashboard (dry-run) ────────────────────────────────────────────────
+_price_cache: dict = {"ts": 0.0, "prices": {}}
+
+
+def _live_prices() -> dict:
+    """Harga mark SEMUA perp Binance dlm 1 request, di-cache 3 dtk (server-side). Dipakai utk
+    'harga terkini' + unrealized PnL live di halaman Agent tanpa membanjiri Binance saat UI
+    polling cepat (1-2 dtk)."""
+    import time as _t
+    now = _t.monotonic()
+    if _price_cache["prices"] and now - _price_cache["ts"] < 3.0:
+        return _price_cache["prices"]
+    try:
+        from src.smc.base import http_get_json
+        rows = http_get_json("https://fapi.binance.com/fapi/v1/ticker/price")
+        _price_cache["prices"] = {r["symbol"]: float(r["price"]) for r in rows
+                                  if str(r.get("symbol", "")).endswith("USDT")}
+        _price_cache["ts"] = now
+    except Exception:  # noqa: BLE001
+        pass
+    return _price_cache["prices"]
+
+
 @app.get("/api/agent")
 def agent_api():
     from src.smc import arena
+    prices = _live_prices()
     with SessionLocal() as s:
         pending_rows = s.scalars(select(DryRunTrade).where(DryRunTrade.status == "pending")
                                  .order_by(desc(DryRunTrade.placed_ts))).all()
@@ -114,7 +137,14 @@ def agent_api():
             eq = eq_by_group.get(r.group) or arena.START_EQUITY
             notional = (r.entry or 0) * (r.original_qty or 0)      # eksposur = qty × harga (setelah leverage)
             margin = r.margin_usd or 0                             # modal terkomit dari equity (notional/leverage)
+            cur = prices.get(f"{r.symbol}USDT")                    # harga terkini (cache 3s)
+            direction = 1 if r.leg == "long" else -1
+            upnl = ((cur - r.entry) * direction * (r.qty_remaining or 0)) if (cur and r.status == "open") else None
             return {"id": r.id, "symbol": r.symbol, "group": r.group, "leg": r.leg,
+                    "current_price": cur,
+                    "unrealized_pnl_usd": round(upnl, 4) if upnl is not None else None,
+                    "unrealized_pct": (round(upnl / margin * 100, 2) if (upnl is not None and margin) else None),
+                    "price_move_pct": (round((cur - r.entry) / r.entry * direction * 100, 3) if (cur and r.entry) else None),
                     "entry": r.entry, "sl": r.sl, "leverage": r.leverage, "mark_price": r.mark_price,
                     "original_qty": r.original_qty, "qty_remaining": r.qty_remaining,
                     "risk_usd": r.risk_usd, "risk_frac": r.risk_frac, "margin_usd": r.margin_usd,

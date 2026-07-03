@@ -229,9 +229,12 @@ def test_reset_wipes_trades_and_fills():
         arena_mod.SessionLocal = orig
 
 
-def test_max_open_positions_is_four_for_both_styles():
-    assert GROUPS["scalp"]["max_open"] == 4
-    assert GROUPS["swing"]["max_open"] == 4
+def test_max_open_positions_is_ten_with_scaled_risk():
+    # web: max 10 posisi/gaya, risk & margin per-trade dikecilkan agar agregat sehat
+    assert GROUPS["scalp"]["max_open"] == 10 and GROUPS["swing"]["max_open"] == 10
+    # 10 x risk% <= ~10% risiko simultan; 10 x margin_cap <= ~35% margin simultan
+    assert GROUPS["scalp"]["risk_pct"] * 10 <= 0.06 and GROUPS["swing"]["risk_pct"] * 10 <= 0.11
+    assert GROUPS["scalp"]["margin_cap"] * 10 <= 0.20 and GROUPS["swing"]["margin_cap"] * 10 <= 0.40
 
 
 def test_funding_fee_helper():
@@ -261,3 +264,13 @@ def test_open_market_stores_funding_rate():
         assert tp.funding_rate == 0.0002 and tp.funding_last_ts is None
         arena.fill_pending(s, tp)
         assert tp.funding_last_ts is not None       # fill -> akrual mulai
+
+
+def test_funding_gate_blocks_high_adverse_funding():
+    """funding_gate web: funding menguntungkan lolos; adverse ekstrem/menggerus-profit ditolak."""
+    from src.smc.risk import funding_gate
+    assert funding_gate(+1, -0.005, 100.0, 102.0, "swing")[0] is True    # long terima -> lolos
+    assert funding_gate(+1, 0.0005, 100.0, 102.0, "swing")[0] is True    # bayar wajar -> lolos
+    assert funding_gate(+1, 0.002, 100.0, 102.0, "swing")[0] is False    # ekstrem absolut -> tolak
+    assert funding_gate(+1, 0.0008, 100.0, 101.0, "swing")[0] is False   # makan >35% target -> tolak
+    assert funding_gate(-1, -0.002, 100.0, 98.0, "swing")[0] is False    # short bayar ekstrem -> tolak
