@@ -93,6 +93,7 @@ def analyze_api(symbol: str):
 
 # ── Agent dashboard (dry-run) ────────────────────────────────────────────────
 _price_cache: dict = {"ts": 0.0, "prices": {}}
+_price_adapter = None    # FallbackAdapter (Binance→ccxt Bybit/OKX) — lazy
 
 
 def _live_prices() -> dict:
@@ -107,13 +108,16 @@ def _live_prices() -> dict:
         return _price_cache["prices"]
     _price_cache["last_try"] = now
     try:
-        from src.smc.base import http_get_json
-        rows = http_get_json("https://fapi.binance.com/fapi/v1/ticker/price", timeout=4.0)  # FAIL-FAST
-        _price_cache["prices"] = {r["symbol"]: float(r["price"]) for r in rows
-                                  if str(r.get("symbol", "")).endswith("USDT")}
-        _price_cache["ts"] = now
+        from src.smc.market import FallbackAdapter
+        global _price_adapter
+        if _price_adapter is None:
+            _price_adapter = FallbackAdapter()
+        px = _price_adapter.all_prices()                  # Binance ticker → fallback ccxt Bybit/OKX
+        if px:
+            _price_cache["prices"] = px
+            _price_cache["ts"] = now
     except Exception:  # noqa: BLE001
-        pass                                              # Binance down -> pakai cache lama, JANGAN hang API
+        pass                                              # semua bursa down -> pakai cache lama, JANGAN hang API
     return _price_cache["prices"]
 
 

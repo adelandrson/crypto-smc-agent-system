@@ -20,6 +20,7 @@ import subprocess as _subprocess
 import sys as _sys
 
 from src.smc.binance_adapter import BinanceAdapter
+from src.smc.market import FallbackAdapter
 from src.smc.confluence import analyze_confluence, fib_preset, ind, sfib
 from src.smc.decide import GROUPS, decide
 from src.smc.fvg_adapter import analyze_for_confluence
@@ -67,7 +68,7 @@ def _pair(symbol: str) -> str:
 
 
 def _fetch_candles(symbol: str, timeframe: str = "1h", limit: int = 220):
-    cli = BinanceAdapter()
+    cli = FallbackAdapter()
     return cli.fetch_ohlcv(_pair(symbol), timeframe, limit=limit, market_type="perp")
 
 
@@ -96,7 +97,7 @@ def sentiment_analyze(symbol: str):
     """Sentimen derivatif: Funding Rate (kontrarian di ekstrem), Open Interest (arah leverage),
     Long/Short Ratio (kontrarian crowd), CVD proxy (taker buy/sell). Sumber: Binance publik."""
     try:
-        cli = BinanceAdapter()
+        cli = FallbackAdapter()
         return aggregate_sentiment([cli], _pair(symbol))
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)[:200]}
@@ -121,7 +122,7 @@ def confluence_signal(symbol: str, style: str = "scalp"):
         return {"error": f"style '{st}' tak dikenal — pilih: scalp | swing"}
     cfg = GROUPS[st]
     try:
-        cli = BinanceAdapter()
+        cli = FallbackAdapter()
         candles = cli.fetch_ohlcv(_pair(symbol), cfg["tf"], limit=cfg["candle_limit"], market_type="perp")
         sent = aggregate_sentiment([cli], _pair(symbol))
         from src.smc.oi_tracker import OITracker

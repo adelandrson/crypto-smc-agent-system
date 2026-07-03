@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from sqlalchemy import case, func, select
 
 from src.smc.binance_adapter import BinanceAdapter
+from src.smc.market import FallbackAdapter
 from src.smc.config_store import effective_groups
 from src.smc.decide import GROUPS, decide
 from src.smc.oi_tracker import OITracker
@@ -261,7 +262,7 @@ def check_pending(cli=None) -> list[str]:
     """Untuk tiap LIMIT order PENDING: fetch bar terbaru, ISI bila harga menyentuh limit
     (long: low<=limit, short: high>=limit), BATALKAN bila TTL habis atau harga kabur searah
     >CANCEL_RUN tanpa pullback (jangan chase). Commit per-order (hindari lock spt check_open)."""
-    cli = cli or BinanceAdapter()
+    cli = cli or FallbackAdapter()
     events: list[str] = []
     with SessionLocal() as s:
         ids = [tid for tid, in s.execute(
@@ -307,7 +308,7 @@ def check_open(cli=None) -> list[str]:
     """Commit PER-POSISI (bukan 1 transaksi raksasa di akhir) -- posisi lain butuh scan
     (screen_place, dry-run cron lain) BISA menulis DB bersamaan tanpa 'database is locked'
     (ditemukan via live smoke test: 1 sesi lama menahan write-lock sepanjang scan network)."""
-    cli = cli or BinanceAdapter()
+    cli = cli or FallbackAdapter()
     events: list[str] = []
     trade_ids = []
     with SessionLocal() as s:
@@ -420,7 +421,7 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     (fetch_ohlcv+sentiment per simbol) bisa lama utk universe besar; 1 sesi panjang menahan
     write-lock SQLite sepanjang itu, bikin writer lain (screen_place gaya lain, check_open,
     endpoint web/chat/rnd_step) gagal 'database is locked'. Ditemukan via live smoke test."""
-    cli = cli or BinanceAdapter()
+    cli = cli or FallbackAdapter()
     init_db()
     oi_tracker = OITracker()
     cfg = effective_groups()[group]        # knob metodologi/leverage/data yg bisa disetel agen
@@ -479,7 +480,7 @@ def step(symbols: list[str] | None = None) -> dict:
     """Siklus cron: (1) isi/batalkan LIMIT order pending, (2) kelola posisi terbuka, (3) scan
     sinyal baru → pasang limit order baru. Urutan penting: pending dulu (mungkin jadi open),
     lalu kelola open, lalu scan (slot dihitung setelah pending diproses)."""
-    cli = BinanceAdapter()
+    cli = FallbackAdapter()
     pending_events = check_pending(cli)
     closed_events = check_open(cli)
     placed = {g: screen_place(cli, group=g, symbols=symbols) for g in GROUPS}
