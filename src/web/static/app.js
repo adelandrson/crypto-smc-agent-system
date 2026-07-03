@@ -286,6 +286,8 @@ function _applyOverlays() {
   const pl = (price, color, title, style) => { if (price != null) _priceLines.push(cs.createPriceLine({ price: +price, color, lineWidth: 1, lineStyle: style ?? 2, axisLabelVisible: true, title: title || "" })); };
   const fib = d.fib || {};
   if (_ind.fib) {
+    if (fib.swing_high && fib.swing_high.price != null) pl(fib.swing_high.price, "#e6b800", "SwH · fib 0", 0);  // anchor
+    if (fib.swing_low && fib.swing_low.price != null) pl(fib.swing_low.price, "#e6b800", "SwL · fib 1", 0);
     if (fib.golden_pocket) { pl(fib.golden_pocket[0], "#e6b800", "GP", 0); pl(fib.golden_pocket[1], "#e6b800", ""); }
     if (fib.ote) { pl(fib.ote[0], "#c792ea", "OTE"); pl(fib.ote[1], "#c792ea", ""); }
     if (fib.equilibrium) pl(fib.equilibrium, "rgba(128,128,128,.55)", "EQ 0.5");
@@ -335,7 +337,10 @@ function _renderIndicatorPanel(d) {
   const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
   const fibL = [];
   const _tr = (d.structure || {}).trend;
+  const _fdate = s => { try { const dt = new Date(s * 1000); return `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`; } catch (e) { return ""; } };
   fibL.push(_tr === "range" ? '<span class="neg">⚠ sideways — fib kurang andal</span>' : `tren <b>${esc(_tr || "?")}</b>`);
+  if (fib.swing_low && fib.swing_high && fib.swing_low.price != null)   // anchor swing yg DIPAKAI (verifikasi)
+    fibL.push(`ditarik: <b>SwL ${_cp(fib.swing_low.price)}</b>${fib.swing_low.time ? ` <span class="muted">${_fdate(fib.swing_low.time)}</span>` : ""} → <b>SwH ${_cp(fib.swing_high.price)}</b>${fib.swing_high.time ? ` <span class="muted">${_fdate(fib.swing_high.time)}</span>` : ""}`);
   if (fib.golden_pocket) fibL.push(`GP ${_cp(Math.min(...fib.golden_pocket))}–${_cp(Math.max(...fib.golden_pocket))}`);
   if (fib.ote) fibL.push(`OTE ${_cp(Math.min(...fib.ote))}–${_cp(Math.max(...fib.ote))}`);
   if (fib.equilibrium != null) fibL.push(`EQ ${_cp(fib.equilibrium)}`);

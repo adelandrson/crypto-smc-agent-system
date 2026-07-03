@@ -193,6 +193,10 @@ class Config:
     enable_inverse: bool = True
     # Higher timeframes (in minutes) to additionally scan, e.g. [60, 240].
     mtf_minutes: list = field(default_factory=list)
+    # When True, require the MIDDLE (displacement) candle to be impulsive: its body must dominate both
+    # neighbours, run in the gap's direction, and not be mostly wick. Filters "false" FVGs where a gap
+    # forms without a real displacement candle. Default off (preserves oracle parity).
+    require_displacement: bool = False
 
     @staticmethod
     def from_dict(data: Optional[dict]) -> "Config":

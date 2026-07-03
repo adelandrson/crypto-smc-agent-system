@@ -147,7 +147,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     volume = [{"time": sec(k[0]), "value": k[5],
                "color": "rgba(38,166,154,.45)" if k[4] >= k[1] else "rgba(239,83,80,.45)"} for k in raw]
     bars = [{"open": k[1], "high": k[2], "low": k[3], "close": k[4], "volume": k[5], "time": k[0]} for k in raw]
-    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25}
+    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True}  # candle tengah wajib impulsif
     try:
         fv = fvgeng.analyze(bars, cfg)
         sf = sfib.analyze(bars, fib_preset(tf))
@@ -162,17 +162,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     for f in (fv.get("fvgs") or []):
         if not f.get("is_active"):              # HANYA FVG hidup (bukan filled/invalidated = zona mati)
             continue
-        i = f.get("formed_index")               # RULE: candle TENGAH (i-1) wajib impulsif & searah
-        if isinstance(i, int) and 2 <= i < len(raw):
-            c1, c2, c3 = raw[i - 2], raw[i - 1], raw[i]
-            b1, b2, b3 = abs(c1[4] - c1[1]), abs(c2[4] - c2[1]), abs(c3[4] - c3[1])
-            rng2, bull = c2[2] - c2[3], f.get("direction") == "bullish"
-            if b2 < max(b1, b3):                # candle tengah bukan penggerak terbesar -> bukan FVG sah
-                continue
-            if rng2 > 0 and b2 < 0.45 * rng2:   # mayoritas wick, bukan impuls bersih
-                continue
-            if (bull and c2[4] < c2[1]) or ((not bull) and c2[4] > c2[1]):  # arah displacement salah
-                continue
+        # filter candle-tengah-impulsif kini di engine (cfg require_displacement) -> tak perlu ulang di sini
         fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
                      "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
     obs = []
@@ -224,13 +214,21 @@ def chart_api(symbol: str, tf: str = "1h"):
     if eq is not None:
         for z in fvgs:
             z["zone"] = "discount" if (z["top"] + z["bottom"]) / 2 < eq else "premium"
+    # ANCHOR fib = swing low & swing high yg DIPAKAI (0% & 100%) + waktunya -> user bisa verifikasi ketepatan
+    al = sf.get("active_leg") or {}
+    _up = fib.get("direction") == "up"
+    _o, _e = fib.get("origin"), fib.get("extreme")
+    _ot, _et = sec(al.get("origin_time")), sec(al.get("extreme_time"))
+    fib_sl = {"price": (_o if _up else _e), "time": (_ot if _up else _et)}   # swing low (anchor)
+    fib_sh = {"price": (_e if _up else _o), "time": (_et if _up else _ot)}   # swing high (anchor)
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,
         "fvg": fvgs[:4], "order_blocks": obs[:4], "swings": swings[-8:],
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
-                "direction": fib.get("direction")},
+                "direction": fib.get("direction"), "swing_low": fib_sl, "swing_high": fib_sh,
+                "origin": _o, "extreme": _e},
         "liquidity": {"sweep": sf.get("liquidity_sweep"), "pools": sf.get("liquidity_pools"),
                       "bsl": bsl, "ssl": ssl},
         "fib_extensions": sf.get("fib_extensions"),
