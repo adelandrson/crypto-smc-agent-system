@@ -1,123 +1,330 @@
 # crypto-smc-agent-system ◈
 
-**Sistem PEMBANDING** untuk [crypto-trader-agent-system](https://github.com/adelandrson/crypto-trader-agent-system)
-(pattern-screening) — metodologi **BERBEDA TOTAL**: **Smart Money Concepts (SMC)** — Fair Value
-Gap (FVG) + Fibonacci/Order Block/struktur BOS-CHoCH, dikombinasikan dengan Open Interest,
-Funding Rate, dan Long/Short Ratio menjadi satu **confluence score (−4..+4)**. Trade hanya
-dieksekusi (dry-run) bila `|full_score| ≥ 2` dan lolos semua filter (disiplin zona, ranging,
-volume anomaly, LSR kontrarian).
+**Sistem agen trading kripto otonom** berbasis **Smart Money Concepts (SMC)** — Fair Value Gap +
+Fibonacci/Order Block/struktur BOS-CHoCH, dipadu Open Interest, Funding Rate & Long/Short Ratio
+menjadi satu **confluence score deterministik (−4..+4)**. Dilengkapi **5 agen LLM** (chat website +
+Telegram), **dashboard web real-time**, dan **broker dry-run** yang mensimulasikan seluruh siklus
+order (entry fleksibel · SL/TP berbasis struktur · funding fee · leverage · margin).
 
-> **Mode dry-run/paper SELAMANYA** — tidak ada API key bursa, tidak ada eksekusi order nyata,
-> tidak ada dana nyata tersentuh. Berjalan **berdampingan** dengan sistem pembanding (port &
-> database terpisah), bukan menggantikannya.
+> ⚠️ **DRY-RUN / PAPER SELAMANYA (mode saat ini).** Tidak ada API key bursa, tidak ada order nyata,
+> tidak ada dana tersentuh. Tujuannya memvalidasi metodologi secara jujur sebelum (kelak) naik ke
+> testnet lalu mainnet lewat gerbang berfase.
 
 ---
 
-## Kenapa sistem ini ada
+## Daftar isi
+1. [Apa yang dibangun](#1-apa-yang-dibangun)
+2. [Kenapa dibangun](#2-kenapa-dibangun)
+3. [Bagaimana dibangun](#3-bagaimana-dibangun)
+4. [Bagaimana sistem bekerja (pipeline)](#4-bagaimana-sistem-bekerja-pipeline)
+5. [Metodologi trading (detail)](#5-metodologi-trading-detail)
+6. [Fitur](#6-fitur)
+7. [Keunggulan](#7-keunggulan)
+8. [Arsitektur & struktur kode](#8-arsitektur--struktur-kode)
+9. [Roster agen](#9-roster-agen)
+10. [Halaman web](#10-halaman-web)
+11. [Instalasi & menjalankan](#11-instalasi--menjalankan)
+12. [Konfigurasi & wewenang agen](#12-konfigurasi--wewenang-agen)
+13. [Telegram](#13-telegram)
+14. [Pengujian](#14-pengujian)
+15. [Keamanan & batasan](#15-keamanan--batasan)
+16. [Peta jalan ke uang-asli](#16-peta-jalan-ke-uang-asli)
 
-Win-rate & akurasi sinyal sistem pembanding (pattern-screening) buruk. Alih-alih menambal
-metodologinya, dibangun sistem independen dengan metodologi **teruji dari sumber eksternal**
-(159 test hijau di bundel sumbernya, `AUDIT.md`-nya sendiri jujur soal hit-rate <50% tapi
-ekspektasi positif dari R:R) — untuk perbandingan yang bermakna, apples-to-apples, live.
+---
 
-## Metodologi (inti diporting dari sumber + penyempurnaan: signal-gaps, TP struktur, entry fleksibel)
+## 1. Apa yang dibangun
+
+Sebuah **platform trading agentik** yang, untuk setiap koin di semesta pilihannya, menghitung sebuah
+skor keyakinan (**confluence**) dari beberapa "kaki" analisis independen, lalu — bila skornya cukup
+kuat dan lolos semua filter — **membuka posisi simulasi** dengan manajemen risiko penuh (SL/TP
+berbasis struktur, leverage, funding). Semua keputusan trading **deterministik** (bukan hasil LLM);
+LLM hanya dipakai untuk **menjelaskan, meringkas, dan mengoperasikan** sistem lewat chat.
+
+Dua gaya trading berjalan berdampingan:
+- **Scalp** — timeframe 5m, hold menit–jam, 1 TP tutup 100%, leverage 15–30×.
+- **Swing** — timeframe 4h, hold hari–minggu, 1–3 TP dinamis, leverage 8–15×.
+
+## 2. Kenapa dibangun
+
+- **Pendekatan pattern-screening (win-rate & akurasi buruk) tidak ditambal, tapi dibandingkan.**
+  Sistem ini adalah **pembanding independen** dengan metodologi berbeda total (SMC), supaya bisa
+  diukur *apples-to-apples* mana yang lebih baik — bukan menebak.
+- **Kejujuran metrik di atas ilusi win-rate.** Metodologi SMC di sini punya *hit-rate* sinyal sering
+  **< 50%**, TAPI **ekspektasi positif** karena rasio risk:reward. Karena itu **metrik utama =
+  expectancy-R & ROI**, bukan win-rate mentah. Banyak `skip` itu **normal & sehat**.
+- **Determinisme = bisa diaudit & direproduksi.** Keputusan entry/exit tidak bergantung pada LLM yang
+  bisa berubah-ubah; setiap trade bisa ditelusuri ke angka confluence yang sama.
+- **Aman dulu, uang belakangan.** Dry-run penuh dulu; jalur ke testnet lalu mainnet diatur bertahap
+  dengan kriteria lulus terukur (lihat [§16](#16-peta-jalan-ke-uang-asli)).
+
+## 3. Bagaimana dibangun
+
+| Lapisan | Teknologi | Catatan |
+|---|---|---|
+| **Engine analisis** | Python **stdlib murni** (tanpa dependensi) | FVG, swing/Fib/OB, indikator — deterministik, tiap engine punya test sendiri |
+| **Confluence & keputusan** | Python | Gabung engine → skor −4..+4 → `decide()` (entry/SL/TP/leverage) |
+| **Broker dry-run** | SQLAlchemy + SQLite | Siklus pending→fill→kelola, funding, fee, slippage — DB-backed lintas-proses |
+| **Data pasar** | REST publik Binance (candle/OI/FR/LSR) + **CoinMarketCap** (semesta) | Analisa & data **tanpa API key**; CMC pakai key untuk daftar koin |
+| **Web** | **FastAPI** + Uvicorn, SSE | Dashboard + chat streaming |
+| **Agen** | LLM tool-calling (OpenAI-compatible) | 5 persona, wewenang berjenjang |
+| **Telegram** | long-polling (`requests`) | Satu otak, dua pintu masuk (web + Telegram) |
+
+Prinsip rekayasa: **engine analisis nol-dependensi & teruji**, **keputusan trading terpisah dari LLM**,
+**data publik dulu** (key hanya untuk hal yang wajib).
+
+## 4. Bagaimana sistem bekerja (pipeline)
 
 ```
-FVG (engine tunggal)         → zona imbalance fresh/tested/mitigated
-Fibonacci/Order Block/BOS-CHoCH (engine tunggal) → golden pocket/OTE, struktur, zona premium/discount
-Open Interest + Funding Rate + Long/Short Ratio  → sentimen derivatif (kontrarian di ekstrem)
-Momentum/Volatilitas (RSI+ADX+volume z-score+RSI-quality) → filter SKIP + kualitas
-Liquidity sweep/EQH-EQL · CVD per-candle divergence · MTF divergence → BOOSTER A+
-                    ↓
-     CONFLUENCE SCORE (−4..+4) = FVG + Fib + OI + FR
-                    ↓
-     |score| ≥ gerbang (default 2) & disiplin zona & lolos semua filter → TRADE (dry-run)
-                    ↓
-     ENTRY FLEKSIBEL: harga di zona (FVG/OB/OTE)=MARKET; di luar=LIMIT retest (pending→fill saat
-     pullback / batal bila TTL/harga kabur) · SL struktur · TP: SCALP 1 TP tutup
-     100% di 2R (main cepat) / SWING 1-3 TP by Volatility State + ATR, LEVEL dari struktur (BE→lock-TP1)
-     · sizing dari risk% (bukan leverage) · harga ditulis 5/4 angka utama
+                    ┌─────────────────────────────────────────────┐
+   CoinMarketCap →  │ 1. SEMESTA (universe.py)                     │
+                    │    mcap ≥ $300M · exclude stablecoin/gold/   │
+                    │    derivative · tradable Binance perp        │
+                    │    → tier TERPISAH scalp & swing (S/A/B/C)   │
+                    └──────────────────┬──────────────────────────┘
+                                       │ tiap koin, per gaya
+                    ┌──────────────────▼──────────────────────────┐
+   Binance REST  →  │ 2. DATA per simbol                          │
+   (publik)         │    candle (putusan di candle TERTUTUP) +    │
+                    │    OI · Funding · LSR · taker-volume        │
+                    └──────────────────┬──────────────────────────┘
+                    ┌──────────────────▼──────────────────────────┐
+                    │ 3. CONFLUENCE (−4..+4)                       │
+                    │    FVG + Fibonacci/OB/BOS-CHoCH + OI + FR    │
+                    │    + booster A+: liquidity sweep · CVD ·     │
+                    │      MTF divergence · RSI quality            │
+                    └──────────────────┬──────────────────────────┘
+                    ┌──────────────────▼──────────────────────────┐
+                    │ 4. GERBANG & FILTER                          │
+                    │    |score| ≥ 2 · disiplin zona (long=disc./  │
+                    │    short=prem.) · anti-ranging · volume OK · │
+                    │    LSR kontrarian · GERBANG FUNDING          │
+                    └──────────────────┬──────────────────────────┘
+                    ┌──────────────────▼──────────────────────────┐
+                    │ 5. RENCANA TRADE (decide)                    │
+                    │    entry FLEKSIBEL (market bila di zona,     │
+                    │    limit bila retest) · SL struktur ·        │
+                    │    qty dari risk% · leverage dari kerapatan  │
+                    │    SL · TP dari Volatility+ATR & struktur    │
+                    └──────────────────┬──────────────────────────┘
+                    ┌──────────────────▼──────────────────────────┐
+                    │ 6. BROKER DRY-RUN (arena.py)                 │
+                    │    pending→fill-on-touch→kelola INTRA-BAR    │
+                    │    (SL/TP saat harga menyentuh) · funding    │
+                    │    fee · fee taker · slippage · evolusi SL   │
+                    └──────────────────┬──────────────────────────┘
+                    ┌──────────────────▼──────────────────────────┐
+                    │ 7. DASHBOARD + AGEN                          │
+                    │    posisi · harga terkini · unrealized PnL · │
+                    │    harga TP · funding · ROI/expectancy ·     │
+                    │    chat (web + Telegram)                     │
+                    └─────────────────────────────────────────────┘
 ```
 
-## Penyesuaian eksplisit (satu-satunya yang berbeda dari metodologi sumber)
+**Loop operasional** (`monitor`, tiap ~20 dtk): kelola posisi terbuka & pending → pindai semesta →
+buka posisi baru bila ada sinyal. Dashboard **refresh tiap 1 detik** (harga terkini di-cache 3 dtk
+di server agar tak membanjiri Binance).
 
-| Param | Sistem ini |
+### Detail penting yang menentukan kejujuran hasil
+- **Putusan ENTRY di candle TERTUTUP.** Candle berjalan punya volume/OHLC parsial → bisa membias
+  filter volume & menyebabkan repaint. Semua analisa entry memakai candle yang sudah selesai.
+- **Manajemen SL/TP INTRA-BAR.** Order SL/TP itu order tersimpan yang tereksekusi *begitu harga
+  menyentuhnya*, tak menunggu candle tutup. Karena itu manajemen posisi memakai high/low bar berjalan
+  (timeframe gaya: scalp 5m, swing 4h) — mencegah bias optimistik "SL terlewat".
+
+## 5. Metodologi trading (detail)
+
+**Confluence score (−4..+4)** = FVG + Fibonacci + Open Interest + Funding Rate. Sinyal hanya
+dipertimbangkan bila **|score| ≥ 2** (`full_strong`). Booster A+ (overlap Fib×FVG, retest Order Block,
+**liquidity sweep/EQH-EQL**, **MTF divergence**, **RSI quality 0–100**) mempertajam kualitas tanpa
+mengubah rentang skor.
+
+**Filter SKIP (semua wajib lolos):**
+- Disiplin zona: **long hanya di discount, short hanya di premium**.
+- Anti-*ranging* (vol_state), anti *volume anomaly* (volume di bawah rata-rata).
+- LSR kontrarian: crowd ekstrem melawan arah → veto.
+- **Gerbang funding**: bila posisi akan **MEMBAYAR** funding yang tinggi (adverse), entry ditolak —
+  ada dua ambang: **absolut** (> 0.1%/8j → tolak; mis. koin kecil dengan funding ekstrem) dan
+  **relatif** (estimasi biaya funding selama hold > 35% dari jarak profit ke TP1). Funding yang
+  **DITERIMA** (menguntungkan posisi) tak pernah memblokir.
+
+**Entry FLEKSIBEL** — harga kini **sudah di zona** (FVG/OB/OTE) → **market**; belum → **limit** di
+retest zona (pending → terisi saat pullback / batal bila TTL habis atau harga kabur).
+
+**Risiko & sizing:**
+- **SL berbasis STRUKTUR** (di luar FVG/swing + buffer), tak pernah dilebarkan.
+- **Ukuran dari risk%** (bukan leverage): scalp 0.5% · swing 1% ekuitas per trade.
+- **Leverage dari kerapatan SL**: scalp 15–30× · swing 8–15× (SL rapat → mendekati batas atas).
+  Leverage **tak** menaikkan risiko per-trade — hanya menentukan margin yang dikomit.
+- **Margin-cap** (scalp 1.5% · swing 3.5% ekuitas) membatasi over-commit di leverage tinggi.
+- **Maks 10 posisi** per gaya (agregat: scalp ≤5% risiko/15% margin; swing ≤10%/35%).
+
+**Take-profit:**
+- **Scalp = SATU TP tutup 100%** di 2R (main cepat, tanpa staging).
+- **Swing = 1–3 TP** — *jumlah* dari **Volatility State + ATR** (trending/breakout→3, mixed→2,
+  ranging→1); *penempatan level* dari **STRUKTUR** (pool likuiditas lawan / opposing Order Block /
+  Fibonacci extension), fallback R-multiple bila struktur kurang.
+- **Evolusi SL**: BE setelah TP1 → lock-TP1 setelah TP2 → trailing.
+
+**Funding fee disimulasikan** (long bayar saat rate>0, short menerima; akrual proporsional per 8 jam)
+dan masuk ke PnL — supaya expectancy mencerminkan biaya nyata perp.
+
+## 6. Fitur
+
+- **Confluence deterministik −4..+4** dari 3 engine SMC + sentimen derivatif.
+- **Semesta CMC dinamis** ≥$300M dengan **tier terpisah scalp/swing** (S/A/B/C), refresh 24 jam.
+- **Entry fleksibel** market/limit + siklus limit-order penuh (pending→fill→cancel).
+- **TP adaptif**: scalp 1×100%, swing 1–3 dinamis, level dari struktur pasar.
+- **Gerbang funding** untuk menghindari funding rate tinggi yang menggerus PnL.
+- **Simulasi realistis**: fee taker, slippage, **funding fee**, evolusi SL, manajemen intra-bar.
+- **Dashboard live** (refresh 1 dtk): harga terkini, **unrealized PnL**, harga TP eksplisit, margin
+  $/% dari equity, notional (×leverage), funding rate & fee.
+- **ROI per gaya** (total termasuk posisi terbuka + realized dari trade tutup) + **expectancy-R** &
+  win-rate — metrik jujur, bukan cuma WR.
+- **5 agen LLM** dengan tool-calling (analisa, sentimen, dry-run, evaluasi) di web & Telegram.
+- **Wewenang agen 3 mode** (tanpa/menengah/penuh) yang dikontrol admin.
+- **Panel admin** ber-password: mode otoritas, model LLM, kunci rahasia, parameter metodologi.
+- **Format angka rapi**: harga 5/4 angka penting, quantity dipadatkan, funding & % jelas.
+
+## 7. Keunggulan
+
+- **Keputusan trading DETERMINISTIK & teruji** — bisa diaudit, direproduksi, tak "halusinasi" LLM.
+- **Metrik jujur (expectancy-R + ROI)** — tak menjual ilusi win-rate tinggi.
+- **Sadar-funding** — menolak trade yang funding-nya akan memakan profit (jarang ada di sistem lain).
+- **Berbasis struktur, bukan % hafalan** — SL & TP mengikuti likuiditas/OB/Fib nyata pasar.
+- **Anti-repaint di entry, realistis di eksekusi** — putusan pada candle tertutup, tapi SL/TP dieksekusi
+  intra-bar seperti order nyata (tak ada bias optimistik).
+- **Nol dependensi di jantungnya** — engine pure-stdlib, mudah dipindah & di-embed.
+- **Aman-dulu** — dry-run permanen, tanpa kunci withdraw, secret di `.env`, wewenang agen berjenjang.
+- **Data publik** — analisa & sinyal tak butuh API key bursa.
+
+## 8. Arsitektur & struktur kode
+
+```
+src/
+├── engines/                # 3 engine SMC (stdlib murni) + test masing-masing
+│   ├── fvg/                #   Fair Value Gap
+│   ├── sfib/               #   swing/Fibonacci/Order Block/BOS-CHoCH + liquidity sweep
+│   └── ind/                #   RSI/ADX/ATR/Bollinger/volume-z + RSI-quality + MTF divergence
+├── smc/
+│   ├── confluence.py       # gabung engine → skor −4..+4 + booster A+
+│   ├── decide.py           # rencana trade (entry/SL/TP/leverage) + GROUPS config per gaya
+│   ├── risk.py             # sizing, SL struktur, TP struktur, leverage, funding fee & gate
+│   ├── arena.py            # broker dry-run DB-backed (pending/fill/kelola/step/monitor/summary)
+│   ├── universe.py         # semesta CMC + tier terpisah scalp/swing
+│   ├── sentiment.py        # agregasi OI/Funding/LSR/CVD
+│   ├── config_store.py     # parameter metodologi yang bisa disetel (divalidasi & di-clamp)
+│   └── admin_settings.py   # mode wewenang agen (agent-write-blocked)
+├── storage/models.py       # Token(+tier,24h), DryRunTrade(+funding), DryRunFill, Signal, ChatSession
+├── agents/roster.py        # 5 agen: persona, tool per-agen, filter tool per-mode-otoritas
+├── llm/{client,skills}.py  # klien LLM + registry skill (analisa/status/config/ops)
+├── web/{app.py,static/}    # FastAPI (chat SSE + /api/*) + UI (dark, gauge confluence, kartu posisi)
+└── telegram/bot.py         # jembatan Telegram (opsional)
+agents/*.md                 # konstitusi agen: IDENTITY/SOUL/AGENTS/MEMORY/TASKS/USER
+tests/ + src/engines/tests_*/# 131 test (engine + confluence + broker + universe + config + agen)
+```
+
+## 9. Roster agen
+
+| Agen | Peran |
 |---|---|
-| Universe | CMC mcap ≥ $300M, exclude stablecoin/gold/derivative, Binance-perp-tradable, **tier TERPISAH scalp (mcap40/vol60) & swing (mcap60/vol40)** S/A/B/C |
-| Max posisi | 4 per gaya (scalp DAN swing) |
-| Leverage scalp | 15x–30x |
-| Leverage swing | 8x–15x |
-| Risk/trade | 1% scalp · 2% swing dari ekuitas (risk%, bukan leverage) |
-| TP | scalp 1 TP 100% · swing 1-3 TP by Volatility+ATR, level dari struktur |
-| Entry | fleksibel market/limit · +4 signal-gap booster A+ (sweep/CVD/MTF/RSI-quality) |
+| **Orin** (Orchestrator) | Koordinasi, chat website & Telegram, sintesis jawaban |
+| **Vega** (Struktur & Imbalance) | FVG + Fibonacci/OTE + Order Block + BOS/CHoCH |
+| **Arka** (Sentimen Derivatif) | Open Interest + Funding Rate + LSR + momentum/volatilitas |
+| **Wira** (Eksekutor Dry-Run) | Sizing, SL struktur, TP (scalp single/swing 1–3), entry fleksibel, leverage |
+| **Bayu** (Evaluator) | Expectancy-R & ROI jujur (bukan win-rate mentah), universe/tier |
 
-Detail lengkap & alasan tiap penyesuaian → `agents/MEMORY.md`.
+Semua keputusan trading tetap deterministik di kode; agen memberi analisa, ringkasan & operasi.
 
-## Arsitektur
+## 10. Halaman web
 
-```
-src/engines/{fvg,sfib,ind}/     # 3 engine sumber (stdlib-only), diporting verbatim + test masing2
-src/smc/                        # confluence.py, decide.py, arena.py (broker DB-backed), universe.py
-src/storage/models.py           # Token(+tier), DryRunTrade+DryRunFill, SignalSnapshot, ChatSession
-src/agents/roster.py            # 5 agent: Orin/Vega/Arka/Wira/Bayu
-src/llm/{client,skills}.py      # skill: analisa live + status dry-run + akses data + config_* + write_source/run_tests (per mode otoritas)
-src/web/app.py                  # FastAPI: chat SSE + /api/{analyze,signals,universe,agent,admin}
-src/web/static/                 # UI baru (dark/cyan-violet, gauge confluence, TP-ladder)
-src/telegram/bot.py             # jembatan Telegram (opsional) — satu otak, dua pintu masuk
-agents/*.md                     # IDENTITY/SOUL/AGENTS/MEMORY/TASKS/USER — konstitusi agent
-```
+- **Analisa** — rincian confluence per koin (FVG/Fib/OB/zona + sentimen), skor gauge.
+- **Sinyal** — kandidat scalp & swing yang lolos `|score| ≥ 2`.
+- **Universe** — daftar tier S/A/B/C dengan **% naik/turun 24 jam**, mcap, volume.
+- **Agent** — dashboard dry-run: **ROI total & realized per gaya**, expectancy, posisi terbuka
+  (harga terkini, unrealized PnL, harga TP, margin/notional, funding), pending, riwayat.
+- **Admin** — ber-password: mode wewenang agen, model LLM, kunci rahasia, parameter metodologi.
 
-## Roster agent
-
-| Agent | Peran |
-|---|---|
-| **Orin** (Orchestrator) | Koordinasi, chat website & Telegram, sintesis |
-| **Vega** (Struktur & Imbalance) | FVG + Fib + Order Block + BOS/CHoCH |
-| **Arka** (Sentimen Derivatif) | OI + FR + LSR + momentum/volatilitas |
-| **Wira** (Eksekutor Dry-Run) | Sizing, SL struktur, TP (scalp single/swing 1-3), entry fleksibel, leverage |
-| **Bayu** (Evaluator) | Expectancy-R jujur (bukan win-rate mentah), universe/tier |
-
-## Instalasi
+## 11. Instalasi & menjalankan
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # isi CMC_API_KEY minimal
-.venv/bin/python -m src.smc.universe        # bangun universe pertama kali
-.venv/bin/uvicorn src.web.app:app --host 0.0.0.0 --port 8002
+cp .env.example .env            # isi minimal CMC_API_KEY (+ LLM & Telegram bila dipakai)
+
+.venv/bin/python -m src.smc.universe               # bangun semesta pertama kali
+.venv/bin/uvicorn src.web.app:app --host 127.0.0.1 --port 8002   # web + API
+
+# (opsional) loop dry-run otomatis:
+.venv/bin/python -m src.smc.arena monitor --interval=20
 ```
 
-## Verifikasi
+Buka `http://127.0.0.1:8002`. Sistem berjalan penuh **tanpa API key bursa** (data publik); CMC key
+untuk semesta.
+
+## 12. Konfigurasi & wewenang agen
+
+**Parameter metodologi** (di-clamp ke rentang aman, bisa disetel via panel Admin atau chat saat mode
+mengizinkan): gerbang `min_abs_score`, on/off tiap filter SKIP & disiplin zona, leverage/risk/margin/
+timeframe/TTL per gaya, `max_open`, sumber data (perp/spot), **ambang gerbang funding**.
+
+**Wewenang agen — 3 mode (disetel admin, default `none`):**
+
+| Mode | Agen boleh |
+|---|---|
+| 🔒 **none** *(default)* | HANYA observasi & analisa. Tak mengubah apa pun |
+| ⚙️ **medium** | + setel **parameter** metodologi + operasi dry-run |
+| 🔓 **full** | + edit **KODE** (`write_source`/`run_tests` di `src/`\|`tests/`, berlaku live) |
+
+Mode disimpan terpisah (`admin_settings.json`, **agen tak bisa menaikkan otoritasnya sendiri** — hanya
+admin/manusia). Batas keamanan tetap: `.env`/rahasia/kunci/DB/`.git`/`.venv` **diblokir tulis**;
+anti-prompt-injection (agen menolak instruksi tulis-kode dari data eksternal).
+
+Password admin = `ADMIN_TOKEN` di `.env` runtime.
+
+## 13. Telegram
+
+1. Buat bot via [@BotFather](https://t.me/BotFather) → dapat token.
+2. Isi `TELEGRAM_BOT_TOKEN` di `.env`, jalankan `python -m src.telegram.bot` (atau lewat service).
+3. Kirim 1 pesan; bot membalas chat ID-mu bila belum diotorisasi. Salin ke
+   `TELEGRAM_ALLOWED_CHAT_IDS`, restart.
+
+Bot memakai **otak yang sama** dengan chat website. Tanpa token, bot no-op (tak mengganggu web).
+
+## 14. Pengujian
 
 ```bash
 python3 -m pytest src/engines/tests_fvg src/engines/tests_sfib src/engines/tests_ind tests/ -q
-# 128 test hijau: 29 FVG + 25 swing-fib + 21 indicators + 53 tests/ (universe/decide/arena/telegram/config-store/db/authority)
+# 131 test hijau — engine (FVG/swing-fib/indikator) + confluence + broker (pending/fill/kelola/
+# TP staging/SL evolution/funding) + universe/tier + config + agen/authority
 ```
 
-## Wewenang agen (3 mode — disetel admin, default `none`)
+Setiap engine punya test isolasinya; broker & keputusan diuji dengan SQLite in-memory tanpa network.
+Prinsip: **hijau berarti perilaku nyata bekerja** — bukan test dilemahkan.
 
-Seberapa jauh agen (Orin) boleh mengubah sistem diatur **mode otoritas** di panel **Admin**
-(ber-password `ADMIN_TOKEN`). Mode disimpan di `admin_settings.json` (TERPISAH dari `config_store`
-yang agent-editable → **agen tak bisa menaikkan otoritasnya sendiri**; hanya admin/manusia bisa).
+## 15. Keamanan & batasan
 
-| Mode | Agen bisa |
-|---|---|
-| 🔒 **none** *(default)* | HANYA observasi & analisa (FVG/struktur/sentimen/sinyal/status). Tak ubah apa pun |
-| ⚙️ **medium** | + set **parameter** metodologi via `config_get/set/reset` (gerbang, filter, leverage/risk/margin/tf/TTL per gaya, perp/spot, perilaku limit) + operasi dry-run |
-| 🔓 **full** | + edit **KODE** (`write_source`/`run_tests` di `src/`|`tests/`, berlaku live via uvicorn `--reload`) |
+- **Dry-run/paper permanen** (mode ini): tanpa order nyata, tanpa dana, tanpa kunci trading.
+- **Tanpa withdraw**: kalaupun kelak ke bursa nyata, izin API wajib **trade-only, tanpa withdraw**.
+- **Secret di `.env`** (di-`.gitignore`): `.env`, `*.db`, `.venv`, log, `admin_settings.json` tak
+  pernah di-commit.
+- **Fill = simulasi** (fee taker + slippage + funding) — perkiraan, bukan eksekusi nyata; validasi
+  akhir tetap di testnet bursa.
+- **Hit-rate sinyal < 50%** *by design* — nilai dipanen dari R:R (expectancy), bukan frekuensi menang.
+  Kumpulkan ≥ 20–30 trade sebelum menilai.
 
-Tool disaring per-mode di `roster.agent_tools_spec/impls` (bukan cuma prompt). **Batas keamanan
-(tetap):** `.env`/rahasia/kunci/DB/skrip-deploy/`.git`/`.venv` DIBLOKIR tulis; anti prompt-injection
-(agen tolak instruksi tulis-kode aneh dari DATA). Config divalidasi & di-clamp; berlaku live
-lintas-proses (web ↔ monitor).
+## 16. Peta jalan ke uang-asli
 
-## Telegram (opsional)
+Bertahap dengan kriteria lulus terukur, **venue-agnostik** (Binance / Bybit / Hyperliquid = pilihan
+pengguna):
 
-1. Buat bot via [@BotFather](https://t.me/BotFather) → dapat token.
-2. Isi `TELEGRAM_BOT_TOKEN` di `.env`, jalankan `python -m src.telegram.bot`.
-3. Kirim 1 pesan ke bot — ia membalas chat ID Anda kalau belum diotorisasi. Salin ke
-   `TELEGRAM_ALLOWED_CHAT_IDS`, restart.
+```
+Dry-run (kini) → Walk-forward/OOS → Dry-run forward panjang → TESTNET bursa-pilihan
+              → Mainnet canary (kecil) → Scale-up
+```
 
-Tanpa token, bot no-op graceful — tak menghalangi web/dry-run.
+Naik level hanya setelah gerbang terpenuhi **dan** sign-off manusia. Selama itu, metrik jujur
+(expectancy-R, ROI, distribusi R) jadi penentu — bukan satu-dua trade beruntung.
 
 ---
-Bukan nasihat keuangan. Dry-run/paper saja — tidak ada dana nyata. Lihat `agents/SOUL.md`.
+
+**Bukan nasihat keuangan.** Dry-run/paper saja — tidak ada dana nyata yang dipertaruhkan. Lihat
+`agents/SOUL.md` untuk prinsip & karakter sistem.
