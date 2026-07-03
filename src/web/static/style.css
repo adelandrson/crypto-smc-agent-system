@@ -343,3 +343,25 @@ code { background: var(--surface-2); padding: 1.5px 6px; border-radius: 4px; fon
 .sug-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border); }
 .sug-item:last-child { border-bottom: none; }
 .sug-item:hover { background: var(--bg); }
+
+/* chart visual (Analisa) */
+#chartWrap { margin: 14px 0 6px; }
+.chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.chart-sym { font-size: 15px; }
+.tf-tabs { display: inline-flex; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.tf-tabs button { border: none; background: transparent; color: var(--muted); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+.tf-tabs button.on { background: var(--accent); color: #fff; }
+.chart-holder { position: relative; width: 100%; height: 430px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+#chart { position: absolute; inset: 0; }
+#chartCanvas { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cl-chip { font-size: 11px; padding: 3px 8px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.cl-chip.pos { color: var(--pos); border-color: var(--pos); }
+.cl-chip.neg { color: var(--neg); border-color: var(--neg); }
+
+/* narasi + kesimpulan agent (Analisa) */
+.narrative { margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.narr-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent); }
+.narr-av { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; }
+.narr-body { padding: 12px 16px; font-size: 13.5px; line-height: 1.6; }
+.narr-body p { margin: 0 0 8px; } .narr-body ul { margin: 4px 0 8px 18px; } .narr-body h1,.narr-body h2,.narr-body h3 { font-size: 14px; margin: 10px 0 4px; }

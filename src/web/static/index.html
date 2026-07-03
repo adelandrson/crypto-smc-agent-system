@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>crypto-smc · sistem pembanding SMC/FVG</title>
-  <link rel="stylesheet" href="/static/style.css?v=9">
+  <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
   <div class="layout">
@@ -37,6 +37,16 @@
           <div id="symSuggest" class="suggest"></div>
         </div>
         <p class="hint"><b>Analisa teknikal murni</b>: Fair Value Gap + Fibonacci/Order Block/struktur (BOS-CHoCH) + momentum (RSI/ADX/volume), dikombinasi dengan Open Interest + Funding Rate + Long/Short Ratio menjadi confluence score −4..+4. Trade hanya jika |score| ≥ 2 & lolos semua filter.</p>
+        <div id="chartWrap" hidden>
+          <div class="chart-bar">
+            <span id="chartSym" class="chart-sym"></span>
+            <div id="tfTabs" class="tf-tabs">
+              <button data-tf="5m">5m</button><button data-tf="15m">15m</button><button data-tf="1h" class="on">1h</button><button data-tf="4h">4h</button><button data-tf="1d">1D</button>
+            </div>
+          </div>
+          <div id="chartHolder" class="chart-holder"><div id="chart"></div><canvas id="chartCanvas"></canvas></div>
+          <div id="chartLegend" class="chart-legend"></div>
+        </div>
         <div id="analyzeOut"></div>
       </section>
 
@@ -97,6 +107,7 @@
     </form>
   </div>
 
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/vendor/lightweight-charts.js"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

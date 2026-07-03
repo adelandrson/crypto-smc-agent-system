@@ -91,6 +91,112 @@ def analyze_api(symbol: str):
     }
 
 
+@app.get("/api/narrative/{symbol}")
+def narrative_api(symbol: str, tf: str = "1h"):
+    """Narasi analisa + KESIMPULAN dari agent (Vega) + LLM, berbasis DATA engine (deterministik).
+    Fallback ringkas bila LLM tak tersedia."""
+    import json as _j
+    from src.llm import skills
+    sym = symbol.strip().upper()
+    data = {
+        "fvg": skills.fvg_analyze(sym, tf), "structure": skills.structure_analyze(sym, tf),
+        "momentum": skills.momentum_analyze(sym, tf), "sentiment": skills.sentiment_analyze(sym),
+        "scalp": skills.confluence_signal(sym, "scalp"), "swing": skills.confluence_signal(sym, "swing"),
+    }
+    prompt = (
+        f"Kamu Vega, analis TEKNIKAL murni. Dari DATA engine berikut untuk {sym} (TF {tf}), tulis analisa "
+        f"RINGKAS & mudah dibaca trader dalam Bahasa Indonesia. Struktur: **1. Struktur & tren**, "
+        f"**2. Zona penting** (FVG/Fibonacci/Order Block + premium/discount), **3. Momentum & sentimen** "
+        f"(RSI/vol_state/OI/FR/LSR), **4. KESIMPULAN**: bias (LONG/SHORT/NETRAL), level kunci, dan apakah "
+        f"ada setup (|score|≥2) atau NO-TRADE + alasannya. Maksimal ~180 kata, boleh poin. JANGAN mengarang "
+        f"angka di luar data.\n\nDATA:\n{_j.dumps(data, ensure_ascii=False)[:3500]}")
+    try:
+        from src.llm import client as llm
+        txt = llm.orchestrator(timeout=60).chat([{"role": "user", "content": prompt}],
+                                                max_tokens=650, temperature=0.4)
+        if txt and txt.strip():
+            return {"ok": True, "by": "Vega + LLM", "narrative": txt.strip()}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "LLM tak tersedia", "detail": str(e)[:120]}
+    return {"ok": False, "error": "LLM tak memberi jawaban"}
+
+
+_CHART_TFS = ("5m", "15m", "1h", "4h", "1d")
+
+
+@app.get("/api/chart/{symbol}")
+def chart_api(symbol: str, tf: str = "1h"):
+    """Candle + SEMUA overlay engine (FVG/Fib/OB/struktur/swing/volume) utk chart visual di Analisa.
+    Waktu -> DETIK (format lightweight-charts). Fallback lintas-bursa via FallbackAdapter."""
+    from src.smc.market import FallbackAdapter
+    from src.smc.confluence import fib_preset, sfib, analyze_confluence
+    from src.engines.fvg import engine as fvgeng
+    sym = symbol.strip().upper()
+    tf = tf if tf in _CHART_TFS else "1h"
+    try:
+        raw = FallbackAdapter().fetch_ohlcv(f"{sym}/USDT", tf, 240, "perp")
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": "gagal ambil candle (semua bursa)"}
+    if not raw or len(raw) < 30:
+        return {"ok": False, "error": "data candle tidak cukup"}
+
+    def sec(ms):
+        return int((ms or 0) / 1000)
+
+    candles = [{"time": sec(k[0]), "open": k[1], "high": k[2], "low": k[3], "close": k[4]} for k in raw]
+    volume = [{"time": sec(k[0]), "value": k[5],
+               "color": "rgba(38,166,154,.45)" if k[4] >= k[1] else "rgba(239,83,80,.45)"} for k in raw]
+    bars = [{"open": k[1], "high": k[2], "low": k[3], "close": k[4], "volume": k[5], "time": k[0]} for k in raw]
+    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25}
+    try:
+        fv = fvgeng.analyze(bars, cfg)
+        sf = sfib.analyze(bars, fib_preset(tf))
+        conf = analyze_confluence(raw, fvg_config=cfg, fib_config=fib_preset(tf))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": True, "symbol": sym, "tf": tf, "candles": candles, "volume": volume,
+                "fvg": [], "order_blocks": [], "swings": [], "fib": {}, "structure": {},
+                "confluence": {}, "warn": f"overlay gagal: {type(e).__name__}"}
+
+    start = sec(raw[0][0])
+    fvgs = []
+    for f in (fv.get("fvgs") or []):
+        if f.get("state") == "mitigated":
+            continue
+        fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
+                     "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
+    obs = []
+    for ob in (sf.get("order_blocks") or []):
+        if ob.get("status") == "mitigated":
+            continue
+        idx = ob.get("index")
+        t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
+        obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"), "from": t})
+    swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"]}
+              for s in (sf.get("swings") or []) if s.get("time")]
+    fib = (sf.get("active_leg") or {}).get("fib") or {}
+    struct = sf.get("structure") or {}
+    return {
+        "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
+        "candles": candles, "volume": volume,
+        "fvg": fvgs[-6:], "order_blocks": obs[-4:], "swings": swings[-8:],
+        "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
+                "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
+                "direction": fib.get("direction")},
+        "structure": {"trend": struct.get("trend"), "event": struct.get("event"),
+                      "event_direction": struct.get("event_direction"),
+                      "last_swing_high": struct.get("last_swing_high"),
+                      "last_swing_low": struct.get("last_swing_low")},
+        "confluence": {"full_score": conf.get("full_score"), "zone": conf.get("zone"),
+                       "fvg_bias": conf.get("fvg_bias"), "in_ote": conf.get("in_ote"),
+                       "in_golden_pocket": conf.get("in_golden_pocket"),
+                       "vol_state": conf.get("vol_state"), "rsi": conf.get("rsi"),
+                       "adx": conf.get("adx"), "volume_ok": conf.get("volume_ok"),
+                       "high_confluence": conf.get("high_confluence"),
+                       "liquidity_pools": conf.get("liquidity_pools"),
+                       "fib_extensions": conf.get("fib_extensions")},
+    }
+
+
 # ── Agent dashboard (dry-run) ────────────────────────────────────────────────
 _price_cache: dict = {"ts": 0.0, "prices": {}}
 _price_adapter = None    # FallbackAdapter (Binance→ccxt Bybit/OKX) — lazy

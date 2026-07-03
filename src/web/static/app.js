@@ -225,10 +225,91 @@ function _confluenceSection(title, d) {
   return body;
 }
 
+// ── CHART VISUAL (lightweight-charts): candle + FVG/OB boxes + fib/struktur + swing markers ──
+let _lwChart = null, _chartTf = "1h";
+function _chartCols() {
+  const dark = document.documentElement.getAttribute("data-theme") !== "light";
+  return { text: dark ? "#93a1b0" : "#556", grid: dark ? "rgba(255,255,255,.05)" : "rgba(0,0,0,.05)" };
+}
+async function renderChart(sym, tf) {
+  _chartTf = tf;
+  document.getElementById("chartWrap").hidden = false;
+  document.getElementById("chartSym").innerHTML = `<b>${esc(sym)}</b> <span class="muted">· ${tf}</span>`;
+  document.querySelectorAll("#tfTabs button").forEach(b => b.classList.toggle("on", b.dataset.tf === tf));
+  const holder = document.getElementById("chart");
+  holder.innerHTML = `<div class="loading" style="padding:40px"><div class="spinner"></div> memuat chart…</div>`;
+  if (!window.LightweightCharts) { holder.innerHTML = `<p class="muted" style="padding:20px">library chart gagal dimuat</p>`; return; }
+  let d;
+  try { d = await (await fetch(`/api/chart/${encodeURIComponent(sym)}?tf=${tf}`)).json(); }
+  catch { holder.innerHTML = `<p class="muted" style="padding:20px">gagal memuat chart</p>`; return; }
+  if (!d.ok) { holder.innerHTML = `<p class="muted" style="padding:20px">${esc(d.error || "gagal")}</p>`; return; }
+  holder.innerHTML = "";
+  if (_lwChart) { try { _lwChart.remove(); } catch (e) { /* */ } _lwChart = null; }
+  const col = _chartCols();
+  const chart = LightweightCharts.createChart(holder, {
+    layout: { background: { type: "solid", color: "transparent" }, textColor: col.text, fontSize: 11 },
+    grid: { vertLines: { color: col.grid }, horzLines: { color: col.grid } },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: "rgba(128,128,128,.3)" },
+    rightPriceScale: { borderColor: "rgba(128,128,128,.3)" },
+    crosshair: { mode: 1 }, width: holder.clientWidth, height: 430,
+  });
+  const cs = chart.addCandlestickSeries({ upColor: "#26a69a", downColor: "#ef5350", borderVisible: false, wickUpColor: "#26a69a", wickDownColor: "#ef5350" });
+  cs.setData(d.candles);
+  const vs = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.86, bottom: 0 } });
+  vs.setData(d.volume);
+  const pl = (price, color, title, style) => { if (price != null) cs.createPriceLine({ price: +price, color, lineWidth: 1, lineStyle: style ?? 2, axisLabelVisible: true, title: title || "" }); };
+  const fib = d.fib || {};
+  if (fib.golden_pocket) { pl(fib.golden_pocket[0], "#e6b800", "GP", 0); pl(fib.golden_pocket[1], "#e6b800", ""); }
+  if (fib.ote) { pl(fib.ote[0], "#c792ea", "OTE"); pl(fib.ote[1], "#c792ea", ""); }
+  if (fib.equilibrium) pl(fib.equilibrium, "rgba(128,128,128,.55)", "EQ");
+  const st = d.structure || {};
+  pl(st.last_swing_high, "rgba(239,83,80,.45)", "SwH"); pl(st.last_swing_low, "rgba(38,166,154,.45)", "SwL");
+  cs.setMarkers((d.swings || []).map(s => ({ time: s.time, position: s.kind === "high" ? "aboveBar" : "belowBar", color: s.kind === "high" ? "#ef5350" : "#26a69a", shape: s.kind === "high" ? "arrowDown" : "arrowUp", text: s.kind === "high" ? "H" : "L" })));
+  chart.timeScale().fitContent();
+  _lwChart = chart;
+  const canvas = document.getElementById("chartCanvas");
+  const draw = () => _drawBoxes(chart, cs, d, canvas);
+  chart.timeScale().subscribeVisibleTimeRangeChange(draw);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(draw);
+  try { new ResizeObserver(() => { chart.applyOptions({ width: holder.clientWidth }); draw(); }).observe(holder); } catch (e) { /* */ }
+  setTimeout(draw, 80);
+  _renderChartLegend(d);
+}
+function _drawBoxes(chart, cs, d, canvas) {
+  const holder = canvas.parentElement;
+  const w = holder.clientWidth, h = holder.clientHeight, dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+  const ts = chart.timeScale();
+  const box = (from, top, bottom, fill, stroke) => {
+    let x1 = ts.timeToCoordinate(from); if (x1 == null) x1 = 0; x1 = Math.max(0, x1);
+    const y1 = cs.priceToCoordinate(+top), y2 = cs.priceToCoordinate(+bottom);
+    if (y1 == null || y2 == null) return;
+    const yy = Math.min(y1, y2), hh = Math.abs(y2 - y1);
+    ctx.fillStyle = fill; ctx.fillRect(x1, yy, w - x1, hh);
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(x1, yy, w - x1, hh);
+  };
+  (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)"); });
+  (d.order_blocks || []).forEach(o => { const b = o.type === "bull"; box(o.from, o.top, o.bottom, b ? "rgba(66,165,245,.10)" : "rgba(255,167,38,.10)", b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
+}
+function _renderChartLegend(d) {
+  const c = d.confluence || {}, sc = c.full_score;
+  const chip = (t, cls) => `<span class="cl-chip ${cls || ""}">${t}</span>`;
+  document.getElementById("chartLegend").innerHTML =
+    chip(`score ${sc > 0 ? "+" : ""}${sc ?? "?"}`, sc > 0 ? "pos" : sc < 0 ? "neg" : "") +
+    chip(`zona ${esc(c.zone || "?")}`) + (c.high_confluence ? chip("A+ confluence", "pos") : "") +
+    chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "") +
+    chip(`<span style="color:#26a69a">▧</span> FVG↑`) + chip(`<span style="color:#ef5350">▧</span> FVG↓`) +
+    chip(`<span style="color:#66a5f5">▧</span> Order Block`) + chip(`<span style="color:#e6b800">━</span> golden pocket`) + chip(`<span style="color:#c792ea">━</span> OTE`);
+}
+document.querySelectorAll("#tfTabs button").forEach(b => b.onclick = () => { if (_activeSym) renderChart(_activeSym, b.dataset.tf); });
+
 async function analyze(symbol) {
   if (!symbol) return;
   const sym = symbol.trim().toUpperCase();
   _activeSym = sym;
+  renderChart(sym, _chartTf);        // chart visual + overlay engine
   const out = document.getElementById("analyzeOut");
   out.innerHTML = `<div class="loading"><div class="spinner"></div> menganalisa ${esc(sym)}…</div>`;
   try {
@@ -242,9 +323,23 @@ async function analyze(symbol) {
       <div><span>LSR score</span><b>${(d.sentiment || {}).lsr_score ?? "—"}</b></div>
     </div>`;
     html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">${_confluenceSection("Scalp (5m)", d.scalp)}${_confluenceSection("Swing (4h)", d.swing)}</div>`;
+    html += `<div id="narrativeBox" class="narrative"><div class="narr-head"><span class="narr-av">◈</span> <b>Analisa &amp; kesimpulan</b> <span class="muted">— Vega + LLM</span></div>
+      <div id="narrativeBody" class="narr-body"><div class="loading"><div class="spinner"></div> agent menyusun analisa…</div></div></div>`;
     out.innerHTML = html;
+    _loadNarrative(sym, _chartTf);      // narasi + kesimpulan agent (async, tak blok chart)
   } catch (e) {
     out.innerHTML = `<p class="muted">gagal memuat analisa: ${esc(String(e))}</p>`;
+  }
+}
+async function _loadNarrative(sym, tf) {
+  const body = document.getElementById("narrativeBody");
+  if (!body) return;
+  try {
+    const d = await (await fetch(`/api/narrative/${encodeURIComponent(sym)}?tf=${tf}`)).json();
+    if (d.ok && d.narrative) body.innerHTML = md(d.narrative);
+    else body.innerHTML = `<p class="muted">Narasi LLM tak tersedia saat ini (${esc(d.error || "—")}). Confluence numerik di atas tetap valid.</p>`;
+  } catch (e) {
+    body.innerHTML = `<p class="muted">gagal memuat narasi: ${esc(String(e))}</p>`;
   }
 }
 
