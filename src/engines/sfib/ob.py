@@ -22,13 +22,22 @@ def _is_bullish(b: Bar) -> bool:
 
 
 def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
-                        lookback: int = 10, max_blocks: int = 4) -> List[dict]:
+                        lookback: int = 10, max_blocks: int = 4,
+                        atr: Optional[Sequence[float]] = None,
+                        refine_mult: float = 1.5) -> List[dict]:
     """Find the most recent OB zones from the swing sequence.
 
     For each confirmed swing leg (O->E), the OB is the last opposite-colour
     candle at or before the origin pivot, within `lookback` bars. A zone is
-    [low, high] of that candle (full range). `mitigated` = price has since
-    returned into the zone after formation; `fresh` = unmitigated (highest quality).
+    [low, high] of that candle (full range) — REFINED to the candle BODY when the
+    full range is oversized (> refine_mult x ATR; giant candles otherwise paint a
+    zone so wide that later opposite OBs nest inside it, confusing the read).
+
+    Lifecycle: `fresh` (untouched, highest quality) -> `mitigated` (price traded
+    back INTO the zone) -> `broken` (a candle CLOSED beyond the far edge: below a
+    bull OB / above a bear OB). A broken OB is INVALID as its original type — it
+    no longer acts as demand/supply (at best it flips into a breaker for the
+    other side), so consumers should drop it.
     """
     out: List[dict] = []
     if len(swings) < 2 or not bars:
@@ -57,11 +66,22 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
             continue
         b = bars[ob_bar]
         top, bottom = max(b.high, b.low), min(b.high, b.low)
-        # mitigation: did any bar AFTER formation trade back into the zone?
+        # REFINEMENT: giant candle -> zone = body only (keeps the zone actionable)
+        a = atr[ob_bar] if atr is not None and 0 <= ob_bar < len(atr) else 0.0
+        refined = False
+        if a > 0 and (top - bottom) > refine_mult * a:
+            body_top, body_bot = max(b.open, b.close), min(b.open, b.close)
+            if body_top > body_bot:              # skip pure doji (no body to refine to)
+                top, bottom, refined = body_top, body_bot, True
+        # lifecycle: mitigated = traded back INTO zone; broken = CLOSED through far edge
         mitigated = False
+        broken = False
         for i in range(ob_bar + 1, last_idx + 1):
-            if bars[i].low <= top and bars[i].high >= bottom:
+            bi = bars[i]
+            if not mitigated and bi.low <= top and bi.high >= bottom:
                 mitigated = True
+            if (want_bull and bi.close < bottom) or ((not want_bull) and bi.close > top):
+                broken = True
                 break
         out.append({
             "type": "bull" if want_bull else "bear",
@@ -70,8 +90,10 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
             "mid": round((top + bottom) / 2, 8),
             "index": ob_bar,
             "leg_direction": direction,
+            "refined": refined,
             "mitigated": mitigated,
-            "status": "mitigated" if mitigated else "fresh",
+            "broken": broken,
+            "status": "broken" if broken else ("mitigated" if mitigated else "fresh"),
         })
     return out
 

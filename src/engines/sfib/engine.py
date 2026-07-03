@@ -104,7 +104,7 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
     O_piv, E_piv = _select_fib_leg(swings, struct.get("trend"))
     O, E = O_piv.price, E_piv.price
     fib = fib_for_leg(O, E, price)
-    order_blocks = detect_order_blocks(bars, swings)
+    order_blocks = detect_order_blocks(bars, swings, atr=atr)   # atr -> refine zona candle raksasa
 
     # Fib bias leg for confluence: price in OTE aligned with the active leg
     fib_score = 0

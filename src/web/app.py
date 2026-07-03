@@ -222,7 +222,9 @@ def chart_api(symbol: str, tf: str = "1h"):
         fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
                      "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
     obs = []
-    for ob in (sf.get("order_blocks") or []):   # tampilkan SEMUA OB (fresh + retest/mitigated), beri status
+    for ob in (sf.get("order_blocks") or []):   # OB fresh + retest/mitigated — TANPA yg broken (invalid)
+        if ob.get("status") == "broken":        # harga sudah CLOSE menembus sisi jauh -> OB mati
+            continue
         idx = ob.get("index")
         t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
         obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"),
@@ -239,6 +241,14 @@ def chart_api(symbol: str, tf: str = "1h"):
         else:
             mo.append(dict(o))
     obs = mo
+    # NESTED lawan-tren: OB kecil tipe lawan yg SEPENUHNYA di dalam OB lain = reaksi internal ->
+    # buang yg melawan tren (uptrend: supply nested dibuang; downtrend: demand nested) — kurangi tumpukan.
+    _trend = (sf.get("structure") or {}).get("trend")
+    if _trend in ("uptrend", "downtrend"):
+        _dropt = "bear" if _trend == "uptrend" else "bull"
+        obs = [o for o in obs if not (o["type"] == _dropt and any(
+            x is not o and x["type"] != o["type"] and x["bottom"] <= o["bottom"] and x["top"] >= o["top"]
+            for x in obs))]
     for o in obs:                               # FLIP ZONE: OB demand & supply tumpang-tindih (breaker/
         o["flip"] = any(x is not o and x["type"] != o["type"]   # mitigation) = key level kuat (2 pihak setuju)
                         and o["bottom"] <= x["top"] and o["top"] >= x["bottom"] for x in obs)
