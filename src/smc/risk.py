@@ -78,14 +78,12 @@ _EST_FUNDING_PERIODS = {"scalp": 1, "swing": 6}   # estimasi periode 8j yg dilew
 
 
 def funding_gate(direction: int, funding_rate, entry: float, tp_price, mode: str = "swing",
-                 max_pay_8h: float = 0.001, max_profit_frac: float = 0.35, max_abs_8h: float = 0.003):
-    """Gerbang funding — cermin paper/risk.py sumber. Return (ok: bool, reason: str) — reason='' bila lolos.
-    (0) EKSTREM dua-arah: |funding| > max_abs_8h (0.3%/8j) -> tolak koin ini SAMA SEKALI (pasar tak
-    stabil/manipulatif, mis. LAB 0.76%). (1) bayar > max_pay_8h -> tolak. (2) bayar estimasi > 35%
-    target profit -> tolak. Funding diterima & tak ekstrem tak pernah memblokir."""
+                 max_pay_8h: float = 0.001, max_profit_frac: float = 0.35):
+    """Gerbang funding — cermin paper/risk.py sumber. Return (ok: bool, reason: str). HANYA blok sisi
+    yg MEMBAYAR funding tinggi (long saat rate>0/short saat rate<0); yg MENERIMA selalu lolos.
+    (1) bayar > max_pay_8h -> tolak. (2) bayar estimasi > 35% target -> tolak.
+    (Penghindaran koin PUMP-manipulatif ditangani lapisan terpisah: pump_guard.)"""
     rate = funding_rate or 0.0
-    if abs(rate) > max_abs_8h:
-        return False, f"funding EKSTREM {abs(rate)*100:.2f}%/8j — pasar tak stabil, koin dihindari"
     pay_rate = max(0.0, direction * rate)
     if pay_rate <= 0:
         return True, ""
@@ -98,6 +96,61 @@ def funding_gate(direction: int, funding_rate, entry: float, tp_price, mode: str
             if frac > max_profit_frac:
                 return False, f"funding bayar {pay_rate*100:.3f}%/8j makan ~{frac*100:.0f}% target profit"
     return True, ""
+
+
+def pump_guard(candles, tier, spike_mult: float = 6.0, pump_min: float = 0.30,
+               wick_min: float = 0.45, base_quantile: float = 0.7,
+               block_above: float = 0.15, recent: int = 20) -> dict:
+    """Deteksi 'crime pump/dump' pada koin TIER RENDAH (A/B/C) — cermin paper/risk.py sumber.
+    Baseline volume kecil-konsisten -> SPIKE volume mengangkat harga -> pump artifisial. Aksi:
+    BLOKIR LONG di puncak; SHORT hanya bila DISTRIBUSI SELESAI (candle wick-reject atas dgn volume
+    manipulasi TERTINGGI + harga turun dari puncak + >=2 wick-reject), target = harga PRA-PUMP.
+    `candles` = OHLCV HTF (idealnya 1D, >=30 hari). Return: is_pump/block_long/short_ok/pre_pump_price/
+    peak_price/pump_pct/reason."""
+    out = {"is_pump": False, "block_long": False, "short_ok": False, "pre_pump_price": None,
+           "peak_price": None, "pump_pct": None, "reason": ""}
+    if tier not in ("A", "B", "C") or not candles or len(candles) < 30:
+        return out
+    o = [c[1] for c in candles]; h = [c[2] for c in candles]
+    lo = [c[3] for c in candles]; cl = [c[4] for c in candles]; v = [c[5] for c in candles]
+
+    def _med(xs):
+        s = sorted(xs)
+        return s[len(s) // 2] if s else 0.0
+
+    sv = sorted(v)
+    base = _med(sv[:max(1, int(len(sv) * base_quantile))])
+    if base <= 0:
+        return out
+    spikes = [i for i, vol in enumerate(v) if vol > base * spike_mult]
+    if not spikes:
+        return out
+    s0 = spikes[0]
+    pre = _med(cl[max(0, s0 - 5):s0] or [cl[0]])
+    if pre <= 0:
+        return out
+    peak = max(h[s0:])
+    pump_pct = (peak - pre) / pre
+    if pump_pct < pump_min:
+        return out
+    cur = cl[-1]
+    out.update(is_pump=True, pre_pump_price=pre, peak_price=peak, pump_pct=pump_pct)
+    out["block_long"] = cur > pre * (1 + block_above)
+    out["reason"] = (f"crime-pump tier {tier}: +{pump_pct * 100:.0f}% dari {pre:.6g} "
+                     f"(spike volume {len(spikes)}× > {spike_mult:.0f}×baseline)")
+
+    def uwick(i):
+        rng = h[i] - lo[i]
+        return (h[i] - max(o[i], cl[i])) / rng if rng > 0 else 0.0
+
+    pv = max(spikes, key=lambda i: v[i])
+    rejections = sum(1 for i in range(s0, len(candles)) if uwick(i) >= wick_min)
+    dump_done = uwick(pv) >= wick_min and pv >= len(candles) - recent
+    fell = cur < peak * 0.98
+    out["short_ok"] = bool(dump_done and rejections >= 2 and fell)
+    if out["short_ok"]:
+        out["reason"] += f"; DISTRIBUSI SELESAI (dump-candle vol-tertinggi wick-reject) → SHORT target {pre:.6g}"
+    return out
 
 
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:

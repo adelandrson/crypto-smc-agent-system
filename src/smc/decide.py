@@ -9,7 +9,7 @@ tak tersentuh.
 from __future__ import annotations
 
 from src.smc.confluence import analyze_confluence, fib_preset
-from src.smc.risk import (entry_plan, funding_gate, position_size, structure_sl,
+from src.smc.risk import (entry_plan, funding_gate, position_size, pump_guard, structure_sl,
                           structure_tp_prices, swing_tp_count, tp_targets)
 
 # ── konfigurasi per-gaya (penyesuaian eksplisit user, lihat plan) ──
@@ -20,7 +20,7 @@ GROUPS = {
         # max_open 4->10 (khusus web). Risk/margin per-trade DIKECILKAN agar agregat tetap sehat:
         # 10 x 0.5% = 5% risiko simultan · 10 x 1.5% = 15% margin simultan.
         "risk_pct": 0.005, "margin_cap": 0.015, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "funding_max_abs_8h": 0.003,  # gate funding
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,  # gate funding
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 6,     # limit order kadaluarsa 6 jam (main cepat)
     },
@@ -29,7 +29,7 @@ GROUPS = {
         "lev_min": 8, "lev_max": 15, "stop_ref": (0.01, 0.08),
         # max_open 4->10 (khusus web). 10 x 1% = 10% risiko simultan · 10 x 3.5% = 35% margin simultan.
         "risk_pct": 0.01, "margin_cap": 0.035, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "funding_max_abs_8h": 0.003,
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 48,     # limit order kadaluarsa 48 jam
     },
@@ -50,7 +50,7 @@ def _choose_leverage(cfg: dict, stop_dist_frac: float) -> int:
 
 
 def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: float,
-           cfg: dict, lsr_score: int = 0, funding_rate: float = 0.0) -> dict:
+           cfg: dict, lsr_score: int = 0, funding_rate: float = 0.0, pump=None) -> dict:
     """Pure decision (tanpa network/side-effect). Return action dict — 'open' atau 'skip'."""
     c = analyze_confluence(candles, fvg_config=cfg["fvg_config"], fib_config=fib_preset(cfg["tf"]),
                            fr_score=fr_score, oi_score=oi_score)
@@ -59,6 +59,14 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     if abs(c["full_score"]) < min_score:
         return {"action": "skip", "reason": f"|score| {abs(c['full_score'])} < gate {min_score}", "confluence": c}
     direction = 1 if c["full_score"] > 0 else -1
+    # LAPIS ANTI CRIME-PUMP (koin tier A ke bawah): blokir LONG di puncak pump artifisial; SHORT hanya
+    # bila DISTRIBUSI SELESAI (candle wick-reject bervolume manipulasi tertinggi + harga turun dari puncak)
+    if pump and pump.get("is_pump"):
+        if direction > 0 and pump.get("block_long"):
+            return {"action": "skip", "reason": pump["reason"], "confluence": c}
+        if direction < 0 and not pump.get("short_ok"):
+            return {"action": "skip", "confluence": c,
+                    "reason": "crime-pump tier rendah: SHORT belum terkonfirmasi (distribusi belum selesai)"}
     # filter SKIP (tiap toggle bisa dimatikan agen via config_store; default sesuai sumber)
     if cfg.get("skip_ranging", True) and c.get("ranging"):
         return {"action": "skip", "reason": "vol_state=ranging (no trend)", "confluence": c}
@@ -106,13 +114,17 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
                                 liquidity_pools=c.get("liquidity_pools"),
                                 fib_extensions=c.get("fib_extensions"), n=n_tp)
     tps = tp_targets(direction, entry, sl, mode=mode, levels=levels, prices=tp_px)
-    # FUNDING GATE: hindari funding EKSTREM (dua arah, pasar tak stabil) + funding-bayar yg gerus PnL
+    # SHORT crime-pump: target profit = harga PRA-PUMP (retrace penuh) -> set TP terjauh ke sana
+    if pump and pump.get("short_ok") and direction < 0 and pump.get("pre_pump_price"):
+        target = pump["pre_pump_price"]
+        if tps and (tps[-1].get("price") is None or target < tps[-1]["price"]):
+            tps[-1]["price"] = target
+    # FUNDING GATE: tolak bila funding yg DIBAYAR (adverse) menggerus PnL (hanya sisi yg membayar)
     tp1_px = tps[0].get("price") if tps else None
     ok, freason = funding_gate(
         direction, funding_rate, entry, tp1_px, mode=mode,
         max_pay_8h=cfg.get("funding_max_pay_8h", 0.001),
-        max_profit_frac=cfg.get("funding_max_profit_frac", 0.35),
-        max_abs_8h=cfg.get("funding_max_abs_8h", 0.003))
+        max_profit_frac=cfg.get("funding_max_profit_frac", 0.35))
     if not ok:
         return {"action": "skip", "confluence": c, "reason": freason}
     return {"action": "open", "symbol": symbol, "direction": direction, "entry": entry, "sl": sl,

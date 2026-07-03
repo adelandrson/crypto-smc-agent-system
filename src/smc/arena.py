@@ -19,7 +19,7 @@ from src.smc.binance_adapter import BinanceAdapter
 from src.smc.config_store import effective_groups
 from src.smc.decide import GROUPS, decide
 from src.smc.oi_tracker import OITracker
-from src.smc.risk import fmt_price, funding_fee
+from src.smc.risk import fmt_price, funding_fee, pump_guard
 from src.smc.sentiment import aggregate_sentiment
 from src.smc.session import session_ok
 from src.storage.db import SessionLocal, init_db
@@ -349,6 +349,30 @@ def check_open(cli=None) -> list[str]:
     return events
 
 
+# ── lapis anti crime-pump (koin tier A ke bawah) ─────────────────────────────
+_PUMP_CACHE: dict = {}     # {sym: (bar_ts_1d, verdict)} — refresh saat candle 1D baru (pola lambat)
+
+
+def _pump_for(cli, sym: str, tier, mkt: str):
+    """Verdict anti crime-pump utk `sym` (hanya tier A/B/C) dari data 1D ~90 hari, di-cache per
+    candle harian. Defensif: None bila tier tinggi / gagal fetch."""
+    if tier not in ("A", "B", "C"):
+        return None
+    try:
+        daily = cli.fetch_ohlcv(f"{sym}/USDT", "1d", limit=90, market_type=mkt)
+        if not daily or len(daily) < 31:
+            return None
+        key = daily[-1][0]
+        cached = _PUMP_CACHE.get(sym)
+        if cached and cached[0] == key:
+            return cached[1]
+        verdict = pump_guard(daily[:-1], tier)    # buang candle 1D berjalan
+        _PUMP_CACHE[sym] = (key, verdict)
+        return verdict
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ── screening (scan universe -> decide -> buka posisi baru) ──────────────────
 def _snapshot(s, group: str, sym: str, d: dict) -> None:
     """Simpan hasil decide() (open ATAU skip) ke SignalSnapshot — isi halaman Sinyal +
@@ -388,6 +412,8 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
     placed = 0
     with SessionLocal() as s:
         syms = symbols or universe_symbols(s, group=group)
+        tcol = Token.swing_tier if group == "swing" else Token.scalp_tier
+        tier_map = {sy: ti for sy, ti in s.execute(select(Token.symbol, tcol)).all()}   # utk lapis anti-pump
     for sym in syms:
         try:
             candles = cli.fetch_ohlcv(f"{sym}/USDT", cfg["tf"], limit=cfg["candle_limit"], market_type=mkt)
@@ -404,6 +430,7 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
         now_dt = datetime.fromtimestamp(candles[-1][0] / 1000.0, tz=timezone.utc)
         if not session_ok(now_dt, cfg["mode"], allow_asia=False):
             continue
+        pump = _pump_for(cli, sym, tier_map.get(sym), mkt)   # lapis anti crime-pump (tier A ke bawah)
         with SessionLocal() as s:
             has_pos = s.scalar(select(func.count()).select_from(DryRunTrade).where(
                 DryRunTrade.agent == _agent(group), DryRunTrade.symbol == sym,
@@ -414,7 +441,7 @@ def screen_place(cli=None, group: str = "scalp", symbols: list[str] | None = Non
             eq = equity(group, s)
             oi_score = oi_tracker.score(sym, sent.get("total_open_interest"), mark_price)
             d = decide(sym, candles, sent["fr_score"], oi_score, eq, cfg, lsr_score=sent.get("lsr_score", 0),
-                       funding_rate=sent.get("weighted_funding", 0.0))
+                       funding_rate=sent.get("weighted_funding", 0.0), pump=pump)
             _snapshot(s, group, sym, d)
             # slot dari active (pending+open). Entry FLEKSIBEL: market=isi seketika, limit=pending
             if d["action"] == "open" and active_count(group, s) < cfg["max_open"]:

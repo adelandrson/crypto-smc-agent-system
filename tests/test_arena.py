@@ -266,13 +266,30 @@ def test_open_market_stores_funding_rate():
         assert tp.funding_last_ts is not None       # fill -> akrual mulai
 
 
-def test_funding_gate_blocks_high_adverse_funding():
-    """funding_gate web: hindari funding EKSTREM (dua arah) + funding-bayar; wajar/terima lolos."""
+def test_funding_gate_blocks_paying_side_only():
+    """funding_gate web: HANYA blok sisi yg MEMBAYAR; yg MENERIMA selalu lolos (anti-pump terpisah)."""
     from src.smc.risk import funding_gate
-    assert funding_gate(+1, -0.0005, 100.0, 102.0, "swing")[0] is True   # long terima wajar -> lolos
-    assert funding_gate(+1, 0.0005, 100.0, 102.0, "swing")[0] is True    # bayar wajar -> lolos
-    # EKSTREM dua arah (LAB -0.76%/8j): long "terima" pun TETAP ditolak (pasar tak stabil)
-    assert funding_gate(+1, -0.0076, 10.0, 13.0, "swing")[0] is False
-    assert funding_gate(-1, -0.0076, 10.0, 8.0, "swing")[0] is False
-    assert funding_gate(+1, 0.0015, 100.0, 102.0, "swing")[0] is False   # bayar > 0.1% -> tolak
-    assert funding_gate(+1, 0.0008, 100.0, 101.0, "swing")[0] is False   # makan >35% target -> tolak
+    assert funding_gate(+1, -0.0076, 10.0, 13.0, "swing")[0] is True    # long MENERIMA -> lolos
+    assert funding_gate(-1, -0.0076, 10.0, 8.0, "swing")[0] is False    # short MEMBAYAR 0.76% -> tolak
+    assert funding_gate(+1, 0.0005, 100.0, 102.0, "swing")[0] is True   # bayar wajar -> lolos
+    assert funding_gate(+1, 0.0015, 100.0, 102.0, "swing")[0] is False  # bayar >0.1% -> tolak
+    assert funding_gate(+1, 0.0008, 100.0, 101.0, "swing")[0] is False  # makan >35% target -> tolak
+
+
+def test_pump_guard_blocks_long_gates_short():
+    """pump_guard web: koin tier rendah crime-pump -> blokir LONG; SHORT hanya bila distribusi selesai."""
+    from src.smc.risk import pump_guard
+    C = []
+    t = 0
+    for _ in range(30):
+        C.append([t, 10.0, 10.1, 9.9, 10.0, 100.0]); t += 86400000
+    C.append([t, 10.0, 15.0, 10.0, 14.0, 1000.0]); t += 86400000        # PUMP spike
+    for _ in range(4):
+        C.append([t, 14.0, 15.0, 13.5, 14.0, 700.0]); t += 86400000     # distribusi wick atas
+    C.append([t, 14.0, 15.0, 13.0, 13.2, 1500.0]); t += 86400000        # DUMP vol-tertinggi wick-reject
+    for _ in range(4):
+        C.append([t, 13.2, 13.3, 12.9, 13.0, 120.0]); t += 86400000
+    assert pump_guard(C, "S")["is_pump"] is False                        # major -> lewati
+    v = pump_guard(C, "B")
+    assert v["is_pump"] and v["block_long"] and v["short_ok"]
+    assert abs(v["pre_pump_price"] - 10.0) < 0.5                         # target short ~= pra-pump
