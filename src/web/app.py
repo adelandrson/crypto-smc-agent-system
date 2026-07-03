@@ -183,9 +183,19 @@ def chart_api(symbol: str, tf: str = "1h"):
         else:
             mo.append(dict(o))
     obs = mo
-    swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"],
-               "provisional": bool(s.get("provisional"))}
-              for s in (sf.get("swings") or []) if s.get("time")]
+    # SWING PENUH utk chart: engine hanya kirim 8 terakhir (analisa internal tetap pakai semua) ->
+    # hitung ulang seluruh swing signifikan supaya histori chart lengkap (trend terbaca akurat visual).
+    from src.engines.sfib.core import normalize_bars as _nbz, compute_atr as _caz
+    from src.engines.sfib import swings as _swm
+    _pre = fib_preset(tf)
+    try:
+        _nb = _nbz(bars)
+        _sws = _swm.significant_swings(_nb, _caz(_nb, 14), _pre.get("depth", 10), _pre.get("atr_mult", 0.5))
+        swings = [{"time": sec(s.time), "price": s.price, "kind": s.kind, "provisional": bool(s.provisional)}
+                  for s in _sws if s.time]
+    except Exception:  # noqa: BLE001
+        swings = [{"time": sec(s["time"]), "price": s["price"], "kind": s["kind"],
+                   "provisional": bool(s.get("provisional"))} for s in (sf.get("swings") or []) if s.get("time")]
     px = raw[-1][4]
     # GABUNG FVG searah yg tumpang-tindih/menempel -> satu zona (hilangkan tumpukan penanda ganda)
     fvgs.sort(key=lambda f: (f["direction"], f["bottom"]))
@@ -224,7 +234,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,
-        "fvg": fvgs[:4], "order_blocks": obs[:4], "swings": swings[-8:],
+        "fvg": fvgs[:4], "order_blocks": obs[:4], "swings": swings[-30:],
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction"), "swing_low": fib_sl, "swing_high": fib_sh,

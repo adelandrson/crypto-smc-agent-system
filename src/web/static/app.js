@@ -314,16 +314,17 @@ function _drawBoxes() {
   canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.width = w + "px"; canvas.style.height = h + "px";
   const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
   const ts = chart.timeScale();
-  const box = (from, top, bottom, fill, stroke) => {
+  const box = (from, top, bottom, fill, stroke, label) => {
     let x1 = ts.timeToCoordinate(from); if (x1 == null) x1 = 0; x1 = Math.max(0, x1);
     const y1 = cs.priceToCoordinate(+top), y2 = cs.priceToCoordinate(+bottom);
     if (y1 == null || y2 == null) return;
     const yy = Math.min(y1, y2), hh = Math.abs(y2 - y1);
     ctx.fillStyle = fill; ctx.fillRect(x1, yy, w - x1, hh);
     ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.strokeRect(x1, yy, w - x1, hh);
+    if (label && hh >= 9) { ctx.fillStyle = stroke; ctx.font = "9px system-ui,sans-serif"; ctx.fillText(label, x1 + 3, yy + hh / 2 + 3); }
   };
-  if (_ind.fvg) (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.45)" : "rgba(239,83,80,.45)"); });
-  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull", fresh = o.status !== "mitigated"; box(o.from, o.top, o.bottom, b ? (fresh ? "rgba(66,165,245,.14)" : "rgba(66,165,245,.05)") : (fresh ? "rgba(255,167,38,.14)" : "rgba(255,167,38,.05)"), b ? "rgba(66,165,245,.55)" : "rgba(255,167,38,.55)"); });
+  if (_ind.fvg) (d.fvg || []).forEach(f => { const b = f.direction === "bullish"; box(f.from, f.top, f.bottom, b ? "rgba(38,166,154,.09)" : "rgba(239,83,80,.09)", b ? "rgba(38,166,154,.5)" : "rgba(239,83,80,.5)", b ? "FVG↑" : "FVG↓"); });
+  if (_ind.ob) (d.order_blocks || []).forEach(o => { const b = o.type === "bull", fresh = o.status !== "mitigated"; box(o.from, o.top, o.bottom, b ? (fresh ? "rgba(66,165,245,.14)" : "rgba(66,165,245,.05)") : (fresh ? "rgba(255,167,38,.14)" : "rgba(255,167,38,.05)"), b ? "rgba(66,165,245,.6)" : "rgba(255,167,38,.6)", b ? "OB↑ demand" : "OB↓ supply"); });
 }
 // panel indikator: saklar checkbox bernama + detail AREA HARGA tiap deteksi
 function _renderIndicatorPanel(d) {
@@ -334,7 +335,7 @@ function _renderIndicatorPanel(d) {
     chip(`vol ${esc(c.vol_state || "?")}`) + (c.rsi != null ? chip(`RSI ${c.rsi}`) : "");
   const fib = d.fib || {}, st = d.structure || {}, lq = d.liquidity || {}, pools = lq.pools || {};
   const fvgL = (d.fvg || []).map(f => `${f.direction === "bullish" ? "↑" : "↓"} ${_cp(f.bottom)}–${_cp(f.top)} ${f.zone === "discount" ? '<span class="pos">diskon</span>' : f.zone === "premium" ? '<span class="neg">premium</span>' : ""} <span class="muted">${esc(f.state || "")}</span>`);
-  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? "↑" : "↓"} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
+  const obL = (d.order_blocks || []).map(o => `${o.type === "bull" ? '<span style="color:#66a5f5">↑ demand</span>' : '<span style="color:#ff9800">↓ supply</span>'} ${_cp(o.bottom)}–${_cp(o.top)} <span class="muted">${o.status === "mitigated" ? "retest" : "fresh"}</span>`);
   const fibL = [];
   const _tr = (d.structure || {}).trend;
   const _fdate = s => { try { const dt = new Date(s * 1000); return `${dt.getUTCDate()}/${dt.getUTCMonth() + 1}`; } catch (e) { return ""; } };
@@ -361,7 +362,7 @@ function _renderIndicatorPanel(d) {
     <div class="ind-list">
       ${row("fvg", "#26a69a", `FVG <span class="muted">(${(d.fvg || []).length})</span>`, fvgL)}
       ${row("fib", "#e6b800", "Fibonacci · GP/OTE/EQ", fibL)}
-      ${row("ob", "#66a5f5", `Order Block <span class="muted">(${(d.order_blocks || []).length})</span>`, obL)}
+      ${row("ob", "#66a5f5", `Order Block <span class="muted">(${(d.order_blocks || []).length}) · <span style="color:#66a5f5">demand↑</span>/<span style="color:#ff9800">supply↓</span></span>`, obL)}
       ${row("struct", "#ef5350", "Struktur · Swing H/L", stL)}
       ${row("liq", "#ff9800", "Liquidity · EQH/EQL/Sweep", liqL)}
       ${row("vol", "#8aa0b0", "Volume", null, `<span class="muted">histogram bawah chart</span>`)}
