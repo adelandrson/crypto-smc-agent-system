@@ -98,6 +98,67 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
     return out
 
 
+def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 4,
+                 range_mult: float = 1.5, max_zones: int = 8) -> List[dict]:
+    """Zona AKUMULASI/DISTRIBUSI (sideways base) — 'pijakan' di TENGAH tren, pelengkap OB klasik.
+
+    OB klasik hanya menandai origin swing (ekstrem). Padahal di tengah tren ada cluster sideways
+    (>= min_len bar dengan total range <= range_mult x ATR) tempat likuiditas dikumpulkan sebelum
+    harga melanjut — area para pembeli/penjual memasang limit order. Deteksi: run sideways maksimal,
+    lalu bar berikutnya BREAKOUT close di luar range -> zona jadi support (breakout naik, type bull /
+    akumulasi) atau resistance (breakout turun, type bear / distribusi).
+    Lifecycle sama dgn OB: fresh -> mitigated (di-retest) -> broken (close menembus sisi jauh).
+    """
+    out: List[dict] = []
+    n = len(bars)
+    i = 0
+    while i < n - min_len:
+        j = i
+        hi, lo = bars[i].high, bars[i].low
+        while j + 1 < n:
+            a = atr[j + 1] if j + 1 < len(atr) else (atr[-1] if atr else 0.0)
+            nb = bars[j + 1]
+            nh, nl = max(hi, nb.high), min(lo, nb.low)
+            # STOP absorbing when the next bar CLOSES outside the band (that's the breakout, not the
+            # base) — otherwise a greedy range check swallows the breakout candle & hides the zone.
+            closes_in = (lo - 0.15 * a) <= nb.close <= (hi + 0.15 * a)
+            if a > 0 and (nh - nl) <= range_mult * a and closes_in:
+                hi, lo = nh, nl
+                j += 1
+            else:
+                break
+        if (j - i + 1) >= min_len and j + 1 < n:
+            b = bars[j + 1]                       # bar breakout
+            kind = "bull" if b.close > hi else ("bear" if b.close < lo else None)
+            if kind is not None:
+                mitigated = False
+                broken = False
+                for t in range(j + 2, n):
+                    bt = bars[t]
+                    if not mitigated and bt.low <= hi and bt.high >= lo:
+                        mitigated = True
+                    if (kind == "bull" and bt.close < lo) or (kind == "bear" and bt.close > hi):
+                        broken = True
+                        break
+                out.append({
+                    "type": kind,                 # bull = akumulasi/support · bear = distribusi/resist
+                    "top": round(hi, 8),
+                    "bottom": round(lo, 8),
+                    "mid": round((hi + lo) / 2, 8),
+                    "index": i,                   # awal cluster (utk penggambaran box dari sini)
+                    "end_index": j,
+                    "bars": j - i + 1,
+                    "kind": "base",
+                    "mitigated": mitigated,
+                    "broken": broken,
+                    "status": "broken" if broken else ("mitigated" if mitigated else "fresh"),
+                })
+            i = j + 1
+        else:
+            i += 1
+    return out[-max_zones:]
+
+
 def retest(price: float, direction: int, order_blocks: List[dict],
            near_pct: float = 0.5) -> Optional[dict]:
     """Is `price` retesting a fresh OB aligned with `direction`?

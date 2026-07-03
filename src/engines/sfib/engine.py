@@ -8,7 +8,7 @@ from .core import normalize_bars, compute_atr
 from .swings import significant_swings
 from .fib import fib_for_leg, OTE
 from .structure import classify
-from .ob import detect_order_blocks
+from .ob import detect_order_blocks, detect_bases
 
 DEFAULTS = {"depth": 10, "atr_period": 14, "atr_mult": 0.5}
 
@@ -105,6 +105,7 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
     O, E = O_piv.price, E_piv.price
     fib = fib_for_leg(O, E, price)
     order_blocks = detect_order_blocks(bars, swings, atr=atr)   # atr -> refine zona candle raksasa
+    bases = detect_bases(bars, atr)              # zona akumulasi/distribusi (pijakan tengah-tren)
 
     # Fib bias leg for confluence: price in OTE aligned with the active leg
     fib_score = 0
@@ -135,6 +136,7 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
         "config": cfg,
         "structure": struct,
         "order_blocks": order_blocks,
+        "bases": bases,                 # sideways base -> support/resist "pijakan" (limit-order area)
         "ob_retest": ob_retest,
         "liquidity_sweep": liquidity_sweep,
         "liquidity_pools": liquidity_pools,   # {eqh:[...], eql:[...]} — target TP struktur

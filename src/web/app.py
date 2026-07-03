@@ -222,13 +222,15 @@ def chart_api(symbol: str, tf: str = "1h"):
         fvgs.append({"top": f["top"], "bottom": f["bottom"], "direction": f.get("direction"),
                      "state": f.get("state"), "from": sec(f.get("formed_time")) or start})
     obs = []
-    for ob in (sf.get("order_blocks") or []):   # OB fresh + retest/mitigated — TANPA yg broken (invalid)
-        if ob.get("status") == "broken":        # harga sudah CLOSE menembus sisi jauh -> OB mati
+    # OB klasik (origin swing) + zona AKUMULASI/DISTRIBUSI (sideways base tengah-tren = pijakan
+    # limit-order) — keduanya satu layer OB. TANPA yg broken (harga sudah close menembus = invalid).
+    for ob in list(sf.get("order_blocks") or []) + list(sf.get("bases") or []):
+        if ob.get("status") == "broken":
             continue
         idx = ob.get("index")
         t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
         obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"),
-                    "status": ob.get("status"), "from": t})
+                    "status": ob.get("status"), "from": t, "akum": ob.get("kind") == "base"})
     obs.sort(key=lambda o: (o["type"], o["bottom"]))     # GABUNG OB setipe yg tumpang-tindih -> 1 zona
     mo = []
     for o in obs:
@@ -236,6 +238,7 @@ def chart_api(symbol: str, tf: str = "1h"):
         if m and m["type"] == o["type"] and o["bottom"] <= m["top"]:
             m["top"], m["bottom"] = max(m["top"], o["top"]), min(m["bottom"], o["bottom"])
             m["from"] = min(m["from"], o["from"])
+            m["akum"] = bool(m.get("akum") or o.get("akum"))    # OB+base gabung -> tetap tandai akumulasi
             if o.get("status") != "mitigated":
                 m["status"] = o["status"]
         else:
@@ -303,7 +306,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     return {
         "ok": True, "symbol": sym, "tf": tf, "price": conf.get("price"),
         "candles": candles, "volume": volume,
-        "fvg": fvgs[:4], "order_blocks": obs[:4], "swings": swings[-30:],
+        "fvg": fvgs[:4], "order_blocks": obs[:6], "swings": swings[-30:],
         "fib": {"golden_pocket": fib.get("golden_pocket"), "ote": fib.get("ote_zone"),
                 "equilibrium": fib.get("equilibrium"), "levels": fib.get("levels"),
                 "direction": fib.get("direction"), "swing_low": fib_sl, "swing_high": fib_sh,

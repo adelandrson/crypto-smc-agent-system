@@ -94,3 +94,46 @@ def test_ob_giant_candle_refined_to_body():
     giant = [o for o in obs if o["index"] == 15]
     assert giant and giant[0]["refined"] is True
     assert giant[0]["top"] == 100 and giant[0]["bottom"] == 60   # body, bukan wick 130/40
+
+
+def test_bases_detect_accumulation_before_breakout():
+    # tren TURUN mulus -> base KETAT (akumulasi) -> breakout NAIK => zona support bull
+    from sfib.ob import detect_bases
+    rows = []
+    for i in range(16):                          # turun mulus (tetapkan ATR, tak bikin base saingan)
+        c = 120 - i * 1.2
+        rows.append([c + 0.6, c + 0.9, c - 0.9, c - 0.6])
+    for _ in range(6):                           # AKUMULASI: range ketat di ~100
+        rows.append([100.0, 100.5, 99.5, 100.2])
+    for i in range(1, 10):                        # breakout NAIK kuat
+        c = 100.2 + i * 3
+        rows.append([c - 3, c + 0.5, c - 3.2, c])
+    bars = _bars(rows)
+    atr = compute_atr(bars, 14)
+    zs = detect_bases(bars, atr)
+    bulls = [z for z in zs if z["type"] == "bull" and z["kind"] == "base"]
+    assert bulls, f"akumulasi tak terdeteksi: {zs}"
+    z = bulls[-1]
+    assert z["status"] in ("fresh", "mitigated")
+    assert z["bottom"] <= 99.5 + 0.2 and z["top"] >= 100.5 - 0.2
+
+
+def test_bases_broken_when_price_closes_back_through():
+    from sfib.ob import detect_bases
+    rows = []
+    for i in range(16):                          # turun mulus
+        c = 120 - i * 1.2
+        rows.append([c + 0.6, c + 0.9, c - 0.9, c - 0.6])
+    for _ in range(6):                           # base ketat
+        rows.append([100.0, 100.5, 99.5, 100.2])
+    for i in range(1, 6):                        # breakout naik
+        c = 100.2 + i * 3
+        rows.append([c - 3, c + 0.5, c - 3.2, c])
+    for i in range(1, 22):                       # CRASH balik: close jauh di bawah base -> broken
+        c = 115 - i * 2
+        rows.append([c + 2, c + 2.2, c - 0.3, c])
+    bars = _bars(rows)
+    atr = compute_atr(bars, 14)
+    zs = detect_bases(bars, atr)
+    bulls = [z for z in zs if z["type"] == "bull"]
+    assert bulls and bulls[-1]["status"] == "broken"
