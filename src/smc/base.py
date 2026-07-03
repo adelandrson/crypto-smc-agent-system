@@ -10,6 +10,7 @@ which own signing/confirmation/safety — this layer never signs orders itself.
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 import urllib.error
 from abc import ABC, abstractmethod
@@ -18,12 +19,39 @@ from typing import List, Optional
 
 CANONICAL_TFS = ("5m", "15m", "1h", "4h", "1d")
 
+# CIRCUIT-BREAKER per-host: setelah beberapa kegagalan beruntun (mis. Binance mem-block IP kita krn
+# rate-limit), gagal-CEPAT selama cooldown — JANGAN terus menghajar host yg down (memperpanjang ban).
+_CB: dict = {}
+_CB_THRESHOLD = 5
+_CB_COOLDOWN = 120.0
 
-def http_get_json(url: str, timeout: float = 20.0) -> dict:
-    """GET a URL and parse JSON. Raises on network/HTTP/parse error."""
+
+def _cb_host(url: str) -> str:
+    try:
+        return url.split("/")[2]
+    except Exception:  # noqa: BLE001
+        return url
+
+
+def http_get_json(url: str, timeout: float = 8.0) -> dict:
+    """GET a URL & parse JSON. Circuit-breaker: >=5 gagal beruntun ke satu host -> gagal seketika
+    selama 120 dtk (tak hammer host down). Sukses -> reset. Raises on network/HTTP/parse error."""
+    host = _cb_host(url)
+    now = time.monotonic()
+    cb = _CB.get(host)
+    if cb and cb["until"] > now:
+        raise RuntimeError(f"circuit-breaker open: {host} (cooldown, host baru saja gagal berulang)")
     req = urllib.request.Request(url, headers={"User-Agent": "gabungan-skills/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode())
+        if cb:
+            _CB.pop(host, None)                          # sukses -> tutup breaker
+        return data
+    except Exception:
+        fails = (cb["fails"] + 1) if cb else 1
+        _CB[host] = {"fails": fails, "until": now + _CB_COOLDOWN if fails >= _CB_THRESHOLD else 0.0}
+        raise
 
 
 @dataclass
