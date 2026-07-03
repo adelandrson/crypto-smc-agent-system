@@ -279,10 +279,12 @@ def check_pending(cli=None) -> list[str]:
                 except Exception as e:  # noqa: BLE001
                     events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
                     continue
-                if not bars or len(bars) < 2:
+                if not bars:
                     continue
                 direction = 1 if tr.leg == "long" else -1
-                bar = bars[-2]                     # candle CLOSED terakhir (bukan forming) — no repaint
+                bar = bars[-1]                     # bar BERJALAN: LIMIT order tersimpan terisi saat harga
+                #   menyentuhnya INTRA-BAR (bukan nunggu bar tutup). Entry-decision tetap pakai candle
+                #   closed (integritas volume); tapi fill order = realita intra-bar (spt order nyata).
                 high, low, close = bar[2], bar[3], bar[4]
                 touched = (direction > 0 and low <= tr.entry) or (direction < 0 and high >= tr.entry)
                 if touched:
@@ -325,9 +327,12 @@ def check_open(cli=None) -> list[str]:
                 except Exception as e:  # noqa: BLE001
                     events.append(f"{tr.symbol}: fetch error {type(e).__name__}")
                     continue
-                if not bars_fetched or len(bars_fetched) < 2:
+                if not bars_fetched:
                     continue
-                last = bars_fetched[-2]             # candle CLOSED terakhir (bukan forming) — no repaint
+                last = bars_fetched[-1]             # bar BERJALAN: SL/TP tersimpan tereksekusi saat harga
+                #   menyentuh level INTRA-BAR (order nyata trigger intra-bar, tak nunggu bar tutup).
+                #   Tanpa ini, SL yg sudah kena low forming candle "terlewat" -> posisi nyangkut rugi
+                #   jauh lebih besar dari SL (optimistic bias). Entry-decision tetap candle closed.
                 # akrual biaya FUNDING perp sejak akrual terakhir (biaya nyata -> equity, spt broker sumber)
                 if tr.funding_rate and tr.funding_last_ts:
                     hrs = (_now() - tr.funding_last_ts).total_seconds() / 3600.0
