@@ -78,24 +78,26 @@ _EST_FUNDING_PERIODS = {"scalp": 1, "swing": 6}   # estimasi periode 8j yg dilew
 
 
 def funding_gate(direction: int, funding_rate, entry: float, tp_price, mode: str = "swing",
-                 max_pay_8h: float = 0.001, max_profit_frac: float = 0.35):
-    """Tolak entry bila funding yg DIBAYAR (adverse) akan menggerus PnL — cermin paper/risk.py sumber.
-    Funding yg DITERIMA tak pernah memblokir. (1) absolut: adverse >max_pay_8h -> tolak; (2) relatif:
-    estimasi biaya funding atas hold > max_profit_frac dari jarak profit ke TP1 -> tolak.
-    Return (ok, pay_rate, cost_frac)."""
+                 max_pay_8h: float = 0.001, max_profit_frac: float = 0.35, max_abs_8h: float = 0.003):
+    """Gerbang funding — cermin paper/risk.py sumber. Return (ok: bool, reason: str) — reason='' bila lolos.
+    (0) EKSTREM dua-arah: |funding| > max_abs_8h (0.3%/8j) -> tolak koin ini SAMA SEKALI (pasar tak
+    stabil/manipulatif, mis. LAB 0.76%). (1) bayar > max_pay_8h -> tolak. (2) bayar estimasi > 35%
+    target profit -> tolak. Funding diterima & tak ekstrem tak pernah memblokir."""
     rate = funding_rate or 0.0
+    if abs(rate) > max_abs_8h:
+        return False, f"funding EKSTREM {abs(rate)*100:.2f}%/8j — pasar tak stabil, koin dihindari"
     pay_rate = max(0.0, direction * rate)
     if pay_rate <= 0:
-        return True, 0.0, 0.0
+        return True, ""
     if pay_rate > max_pay_8h:
-        return False, pay_rate, None
+        return False, f"funding bayar {pay_rate*100:.3f}%/8j di atas batas — menggerus PnL"
     if tp_price and entry:
         profit_frac = abs(tp_price - entry) / entry
         if profit_frac > 0:
             frac = (pay_rate * _EST_FUNDING_PERIODS.get(mode, 4)) / profit_frac
             if frac > max_profit_frac:
-                return False, pay_rate, frac
-    return True, pay_rate, 0.0
+                return False, f"funding bayar {pay_rate*100:.3f}%/8j makan ~{frac*100:.0f}% target profit"
+    return True, ""
 
 
 def position_size(equity: float, risk_pct: float, entry: float, sl: float) -> float:

@@ -267,10 +267,12 @@ def test_open_market_stores_funding_rate():
 
 
 def test_funding_gate_blocks_high_adverse_funding():
-    """funding_gate web: funding menguntungkan lolos; adverse ekstrem/menggerus-profit ditolak."""
+    """funding_gate web: hindari funding EKSTREM (dua arah) + funding-bayar; wajar/terima lolos."""
     from src.smc.risk import funding_gate
-    assert funding_gate(+1, -0.005, 100.0, 102.0, "swing")[0] is True    # long terima -> lolos
+    assert funding_gate(+1, -0.0005, 100.0, 102.0, "swing")[0] is True   # long terima wajar -> lolos
     assert funding_gate(+1, 0.0005, 100.0, 102.0, "swing")[0] is True    # bayar wajar -> lolos
-    assert funding_gate(+1, 0.002, 100.0, 102.0, "swing")[0] is False    # ekstrem absolut -> tolak
+    # EKSTREM dua arah (LAB -0.76%/8j): long "terima" pun TETAP ditolak (pasar tak stabil)
+    assert funding_gate(+1, -0.0076, 10.0, 13.0, "swing")[0] is False
+    assert funding_gate(-1, -0.0076, 10.0, 8.0, "swing")[0] is False
+    assert funding_gate(+1, 0.0015, 100.0, 102.0, "swing")[0] is False   # bayar > 0.1% -> tolak
     assert funding_gate(+1, 0.0008, 100.0, 101.0, "swing")[0] is False   # makan >35% target -> tolak
-    assert funding_gate(-1, -0.002, 100.0, 98.0, "swing")[0] is False    # short bayar ekstrem -> tolak

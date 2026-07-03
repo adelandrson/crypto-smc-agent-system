@@ -336,13 +336,26 @@ async function loadAgent(silent) {
     if (d.open && d.open.length) html += `<h3 class="ag-h">Posisi terbuka (${d.open.length})</h3>` + d.open.map(_posCard).join("");
     else if (!(d.pending && d.pending.length)) html += `<p class="muted">Tidak ada posisi terbuka atau limit order menunggu.</p>`;
     if (d.closed && d.closed.length) {
-      const thead = `<tr><th>Koin</th><th>Gaya</th><th>Arah</th><th class="r">PnL</th><th class="r">R</th><th>Outcome</th><th>Ditutup</th></tr>`;
-      const rowFn = r => `<tr><td><b>${esc(r.symbol)}</b></td><td class="muted">${esc(r.group)}</td>
-        <td>${r.leg === "long" ? '<span class="pos">LONG</span>' : '<span class="neg">SHORT</span>'}</td>
-        <td class="r ${(r.realized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">$${(r.realized_pnl_usd || 0).toFixed(2)}</td>
-        <td class="r">${r.r_multiple != null ? r.r_multiple + "R" : "—"}</td><td class="muted">${esc(r.outcome || "")}</td>
-        <td class="muted">${r.closed_at ? new Date(r.closed_at).toLocaleString() : ""}</td></tr>`;
-      html += pagedTable("closed", "Riwayat tertutup", thead, d.closed, rowFn);
+      const _hold = (a, b) => { if (!a || !b) return "—"; const h = (new Date(b) - new Date(a)) / 3.6e6; return h < 24 ? h.toFixed(1) + " jam" : (h / 24).toFixed(1) + " hari"; };
+      const thead = `<tr><th>Koin</th><th>Arah</th><th class="r">Entry</th><th class="r">Exit (di mana)</th><th class="r">PnL</th><th class="r">R</th><th>Hasil</th><th class="r">Funding</th><th>Durasi</th></tr>`;
+      const rowFn = r => {
+        const fills = r.fills || [], last = fills[fills.length - 1];
+        const exitStr = last ? `${esc(last.label)} @ ${fmtPrice(last.price)}` : "—";
+        const ocBadge = r.outcome === "tp_full" ? '<span class="pos">TP</span>' : r.outcome === "sl" ? '<span class="neg">SL</span>' : `<span class="muted">${esc(r.outcome || "—")}</span>`;
+        const fillsStr = fills.length ? fills.map(f => `${esc(f.label)} ${r.original_qty ? (f.qty / r.original_qty * 100).toFixed(0) + "%" : ""} @ ${fmtPrice(f.price)} (${f.pnl_usd >= 0 ? "+" : ""}$${(f.pnl_usd || 0).toFixed(2)})`).join(" · ") : "—";
+        return `<tr class="ct-sum">
+          <td><b>${esc(r.symbol)}</b> <span class="muted">${esc(r.group)}</span></td>
+          <td>${r.leg === "long" ? '<span class="pos">LONG</span>' : '<span class="neg">SHORT</span>'} <span class="muted">${r.leverage}x</span></td>
+          <td class="r">${fmtPrice(r.entry)}</td>
+          <td class="r">${exitStr}</td>
+          <td class="r ${(r.realized_pnl_usd || 0) >= 0 ? "pos" : "neg"}">${(r.realized_pnl_usd || 0) >= 0 ? "+" : ""}$${(r.realized_pnl_usd || 0).toFixed(2)}</td>
+          <td class="r ${(r.r_multiple || 0) >= 0 ? "pos" : "neg"}">${r.r_multiple != null ? (r.r_multiple >= 0 ? "+" : "") + r.r_multiple + "R" : "—"}</td>
+          <td>${ocBadge}</td>
+          <td class="r ${(r.funding_paid_usd || 0) >= 0 ? "pos" : "neg"}">${(r.funding_paid_usd || 0) >= 0 ? "+" : ""}$${(r.funding_paid_usd || 0).toFixed(4)}</td>
+          <td class="muted">${_hold(r.entry_ts, r.closed_at)}</td></tr>
+        <tr class="ct-det"><td colspan="9"><span class="muted">SL awal ${fmtPrice(r.sl)} · rincian fill: ${fillsStr} · funding ${(r.funding_paid_usd || 0) >= 0 ? "+" : ""}$${(r.funding_paid_usd || 0).toFixed(4)} · ditutup ${r.closed_at ? new Date(r.closed_at).toLocaleString() : ""}</span></td></tr>`;
+      };
+      html += pagedTable("closed", "Riwayat tertutup (detail simulasi & evaluasi)", thead, d.closed, rowFn);
     }
     out.innerHTML = html;
   } catch (e) {

@@ -20,7 +20,7 @@ GROUPS = {
         # max_open 4->10 (khusus web). Risk/margin per-trade DIKECILKAN agar agregat tetap sehat:
         # 10 x 0.5% = 5% risiko simultan · 10 x 1.5% = 15% margin simultan.
         "risk_pct": 0.005, "margin_cap": 0.015, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,  # gate hindari funding tinggi
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "funding_max_abs_8h": 0.003,  # gate funding
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 6,     # limit order kadaluarsa 6 jam (main cepat)
     },
@@ -29,7 +29,7 @@ GROUPS = {
         "lev_min": 8, "lev_max": 15, "stop_ref": (0.01, 0.08),
         # max_open 4->10 (khusus web). 10 x 1% = 10% risiko simultan · 10 x 3.5% = 35% margin simultan.
         "risk_pct": 0.01, "margin_cap": 0.035, "max_open": 10,
-        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35,
+        "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "funding_max_abs_8h": 0.003,
         "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25},
         "candle_limit": 220, "pending_ttl_h": 48,     # limit order kadaluarsa 48 jam
     },
@@ -106,16 +106,15 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
                                 liquidity_pools=c.get("liquidity_pools"),
                                 fib_extensions=c.get("fib_extensions"), n=n_tp)
     tps = tp_targets(direction, entry, sl, mode=mode, levels=levels, prices=tp_px)
-    # FUNDING GATE: tolak bila funding yg DIBAYAR (adverse) menggerus PnL terlalu besar
+    # FUNDING GATE: hindari funding EKSTREM (dua arah, pasar tak stabil) + funding-bayar yg gerus PnL
     tp1_px = tps[0].get("price") if tps else None
-    ok, pay_rate, cost_frac = funding_gate(
+    ok, freason = funding_gate(
         direction, funding_rate, entry, tp1_px, mode=mode,
         max_pay_8h=cfg.get("funding_max_pay_8h", 0.001),
-        max_profit_frac=cfg.get("funding_max_profit_frac", 0.35))
+        max_profit_frac=cfg.get("funding_max_profit_frac", 0.35),
+        max_abs_8h=cfg.get("funding_max_abs_8h", 0.003))
     if not ok:
-        return {"action": "skip", "confluence": c,
-                "reason": f"funding adverse {pay_rate*100:.3f}%/8j menggerus PnL"
-                          + (f" (~{cost_frac*100:.0f}% target)" if cost_frac else " (ekstrem)")}
+        return {"action": "skip", "confluence": c, "reason": freason}
     return {"action": "open", "symbol": symbol, "direction": direction, "entry": entry, "sl": sl,
             "order_type": order_type,
             "qty": qty, "leverage": lev, "margin_usd": round(notional / lev, 2) if lev else round(notional, 2),
