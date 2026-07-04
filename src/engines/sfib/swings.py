@@ -32,15 +32,22 @@ def raw_pivots(bars: Sequence[Bar], depth: int = 10) -> List[Pivot]:
 
     Confirmation lags by `depth` bars (we only know a pivot once `depth` bars
     have printed after it) — this is honest, not look-ahead.
+
+    Sisi KIRI ketat (`>`/`<`), sisi KANAN non-ketat (`>=`/`<=`): tanpa ini,
+    EQUAL-HIGHS/EQUAL-LOWS (double-top, plateau, wick sama tinggi — justru pola
+    EQH/EQL yang penting di SMC) TAK PERNAH lolos `>` -> swing wick-nya HILANG
+    dari struktur (gejala "wick tak ditandai"). Asimetri kiri-ketat/kanan-longgar
+    menjaga TEPAT SATU pivot per plateau (bar pertama plateau yang menang), jadi
+    tak ada penanda ganda.
     """
     n = len(bars)
     out: List[Pivot] = []
     for i in range(depth, n - depth):
         hi, lo = bars[i].high, bars[i].low
         is_high = all(hi > bars[j].high for j in range(i - depth, i)) and \
-            all(hi > bars[j].high for j in range(i + 1, i + depth + 1))
+            all(hi >= bars[j].high for j in range(i + 1, i + depth + 1))
         is_low = all(lo < bars[j].low for j in range(i - depth, i)) and \
-            all(lo < bars[j].low for j in range(i + 1, i + depth + 1))
+            all(lo <= bars[j].low for j in range(i + 1, i + depth + 1))
         if is_high:
             out.append(Pivot(i, bars[i].time, hi, "high"))
         if is_low:

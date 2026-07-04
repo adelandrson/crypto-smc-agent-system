@@ -35,3 +35,56 @@ def test_atr_filter_drops_noise():
     atr = ca(bars, 14)
     z = zigzag(raw_pivots(bars, fixtures.DEPTH), atr, atr_mult=1000)
     assert len(z) <= 1
+
+
+def _bar(o, c, h, l):
+    return {"time": 0.0, "open": o, "high": h, "low": l, "close": c, "volume": 1000.0}
+
+
+def _rising_then_falling(n=21, peak=10):
+    # naik landai lalu turun -> bikin turning point yg jelas di sekitar `peak`
+    bars = []
+    for i in range(n):
+        base = 100 + i * 0.2 if i < peak else 100 + peak * 0.2 - (i - peak) * 0.5
+        o = base
+        c = base + 0.1
+        bars.append(_bar(o, c, max(o, c) + 0.2, min(o, c) - 0.2))
+    return bars
+
+
+def test_equal_high_double_top_is_marked():
+    # DUA wick sama-tinggi (double-top / EQH) di idx 8 & 10 (idx 9 lebih rendah).
+    # Sebelum fix: strict '>' gagal utk keduanya -> swing high (wick) HILANG.
+    from sfib import normalize_bars as nb, raw_pivots
+    bars = _rising_then_falling()
+    for idx in (8, 10):
+        bars[idx]["high"] = 110.0
+    piv = raw_pivots(nb(bars), depth=3)
+    highs = [p for p in piv if p.kind == "high"]
+    assert any(abs(p.price - 110.0) < 1e-9 for p in highs), "wick equal-high 110 harus tertandai"
+
+
+def test_equal_low_double_bottom_is_marked():
+    from sfib import normalize_bars as nb, raw_pivots
+    # cermin: dua wick-low sama-rendah (EQL) — bikin lembah lalu suntik equal lows
+    bars = []
+    for i in range(21):
+        base = 100 - i * 0.2 if i < 10 else 100 - 10 * 0.2 + (i - 10) * 0.5
+        o = base
+        c = base + 0.1
+        bars.append(_bar(o, c, max(o, c) + 0.2, min(o, c) - 0.2))
+    for idx in (8, 10):
+        bars[idx]["low"] = 96.0
+    piv = raw_pivots(nb(bars), depth=3)
+    lows = [p for p in piv if p.kind == "low"]
+    assert any(abs(p.price - 96.0) < 1e-9 for p in lows), "wick equal-low 96 harus tertandai"
+
+
+def test_plateau_yields_exactly_one_pivot():
+    # Plateau 3-bar sama tinggi -> TEPAT satu pivot (bar pertama), bukan penanda ganda.
+    from sfib import normalize_bars as nb, raw_pivots
+    bars = _rising_then_falling()
+    for idx in (8, 9, 10):
+        bars[idx]["high"] = 110.0
+    piv = [p for p in raw_pivots(nb(bars), depth=3) if abs(p.price - 110.0) < 1e-9]
+    assert len(piv) == 1 and piv[0].index == 8
