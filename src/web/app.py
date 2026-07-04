@@ -192,7 +192,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     try:
         raw = FallbackAdapter().fetch_ohlcv(f"{sym}/USDT", tf, 240, "perp")
     except Exception:  # noqa: BLE001
-        return {"ok": False, "error": "gagal ambil candle (semua bursa)"}
+        return {"ok": False, "error": "Data bursa sementara tak terjangkau (jaringan). Coba lagi sebentar."}
     if not raw or len(raw) < 30:
         return {"ok": False, "error": "data candle tidak cukup"}
 

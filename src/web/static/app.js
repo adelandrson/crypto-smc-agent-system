@@ -247,9 +247,10 @@ async function renderChart(sym, tf) {
   holder.innerHTML = `<div class="loading" style="padding:40px"><div class="spinner"></div> memuat chart…</div>`;
   if (!window.LightweightCharts) { holder.innerHTML = `<p class="muted" style="padding:20px">library chart gagal dimuat</p>`; return; }
   let d;
+  const _retryBtn = `<button class="btn" style="margin-top:10px" onclick="renderChart('${esc(sym)}','${tf}')">↻ Coba lagi</button>`;
   try { d = await (await fetch(`/api/chart/${encodeURIComponent(sym)}?tf=${tf}`)).json(); }
-  catch { holder.innerHTML = `<p class="muted" style="padding:20px">gagal memuat chart</p>`; return; }
-  if (!d.ok) { holder.innerHTML = `<p class="muted" style="padding:20px">${esc(d.error || "gagal")}</p>`; return; }
+  catch { holder.innerHTML = `<div style="padding:20px"><p class="muted">Gagal memuat chart (jaringan).</p>${_retryBtn}</div>`; return; }
+  if (!d.ok) { holder.innerHTML = `<div style="padding:20px"><p class="muted">${esc(d.error || "gagal")}</p>${_retryBtn}</div>`; return; }
   holder.innerHTML = "";
   if (_lwChart) { try { _lwChart.remove(); } catch (e) { /* */ } _lwChart = null; }
   _chartData = d; _priceLines = [];
