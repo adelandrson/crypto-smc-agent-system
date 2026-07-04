@@ -46,14 +46,17 @@ def detect_fvgs(
         if not passes_threshold(top - bottom, price, a, cfg):
             continue
         if getattr(cfg, "require_displacement", False):
-            mid = bars[i - 1]      # candle tengah = displacement; wajib impulsif & searah gap
+            mid = bars[i - 1]      # candle TENGAH = displacement; wajib impulsif & searah gap
             b1 = abs(c0.close - c0.open)
             bm = abs(mid.close - mid.open)
             b3 = abs(c2.close - c2.open)
             rng = mid.high - mid.low
-            if bm < max(b1, b3):                       # tengah bukan penggerak terbesar
+            imp_min = getattr(cfg, "impulse_atr_min", 0.5)
+            if a > 0 and bm < imp_min * a:             # tengah tak cukup impulsif (mutlak vs ATR)
                 continue
-            if rng > 0 and bm < 0.45 * rng:            # mayoritas wick, bukan impuls bersih
+            if bm < 1.2 * max(b1, b3):                 # tengah tak DOMINAN (c1 & c3 harus lebih pendek)
+                continue
+            if rng > 0 and bm < 0.5 * rng:             # mayoritas wick, bukan impuls bersih
                 continue
             if (direction is Direction.BULLISH and mid.close < mid.open) or \
                (direction is Direction.BEARISH and mid.close > mid.open):   # arah displacement salah

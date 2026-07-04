@@ -99,7 +99,7 @@ def _tf_summary(sym: str) -> list:
     from src.smc.market import FallbackAdapter
     from src.smc.confluence import fib_preset, sfib, analyze_confluence
     from src.engines.fvg import engine as fvgeng
-    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True}
+    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True, "enable_inverse": False}
     cli = FallbackAdapter()
     rows = []
     for tf in _NARR_TFS:
@@ -203,7 +203,7 @@ def chart_api(symbol: str, tf: str = "1h"):
     volume = [{"time": sec(k[0]), "value": k[5],
                "color": "rgba(38,166,154,.45)" if k[4] >= k[1] else "rgba(239,83,80,.45)"} for k in raw]
     bars = [{"open": k[1], "high": k[2], "low": k[3], "close": k[4], "volume": k[5], "time": k[0]} for k in raw]
-    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True}  # candle tengah wajib impulsif
+    cfg = {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True, "enable_inverse": False}  # candle tengah wajib impulsif
     try:
         fv = fvgeng.analyze(bars, cfg)
         sf = sfib.analyze(bars, fib_preset(tf))

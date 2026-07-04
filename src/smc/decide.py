@@ -22,7 +22,7 @@ GROUPS = {
         "risk_pct": 0.005, "margin_cap": 0.015, "max_open": 10,
         "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "pump_min_rr": 2.5,
         "pump_spike_min": 15.0, "pump_mcap_ceiling": 5e9,  # gate funding+crime-pump
-        "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True},
+        "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True, "enable_inverse": False},
         "candle_limit": 220, "pending_ttl_h": 6,     # limit order kadaluarsa 6 jam (main cepat)
     },
     "swing": {
@@ -32,7 +32,7 @@ GROUPS = {
         "risk_pct": 0.01, "margin_cap": 0.035, "max_open": 10,
         "funding_max_pay_8h": 0.001, "funding_max_profit_frac": 0.35, "pump_min_rr": 2.5,
         "pump_spike_min": 15.0, "pump_mcap_ceiling": 5e9,
-        "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True},
+        "fvg_config": {"threshold_mode": "atr", "min_atr_mult": 0.25, "require_displacement": True, "enable_inverse": False},
         "candle_limit": 220, "pending_ttl_h": 48,     # limit order kadaluarsa 48 jam
     },
 }
