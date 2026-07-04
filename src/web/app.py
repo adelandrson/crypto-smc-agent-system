@@ -188,9 +188,16 @@ def chart_api(symbol: str, tf: str = "1h"):
     from src.smc.confluence import fib_preset, sfib, analyze_confluence
     from src.engines.fvg import engine as fvgeng
     sym = symbol.strip().upper()
+    # terima "BTC" maupun "BTCUSDT"/"BTC/USDT" -> base bersih supaya tak jadi "BTCUSDTUSDT" (HTTP 400)
+    base = sym.replace("/", "").replace("-", "")
+    if base.endswith("USDT"):
+        base = base[:-4]
+    elif base.endswith("USD"):
+        base = base[:-3]
+    base = base or sym
     tf = tf if tf in _CHART_TFS else "1h"
     try:
-        raw = FallbackAdapter().fetch_ohlcv(f"{sym}/USDT", tf, 240, "perp")
+        raw = FallbackAdapter().fetch_ohlcv(f"{base}/USDT", tf, 240, "perp")
     except Exception:  # noqa: BLE001
         return {"ok": False, "error": "Data bursa sementara tak terjangkau (jaringan). Coba lagi sebentar."}
     if not raw or len(raw) < 30:

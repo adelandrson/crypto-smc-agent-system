@@ -9,6 +9,13 @@ from __future__ import annotations
 
 import time as _time
 
+# DNS via 1.1.1.1 utk host bursa (data + ccxt Bybit/OKX) — hindari DNS-block ISP. Nonaktif via DOH_DISABLE=1.
+try:
+    from src.smc.dns_resolver import install as _install_doh
+    _install_doh()
+except Exception:  # noqa: BLE001
+    pass
+
 from src.smc.binance_adapter import BinanceAdapter
 
 _FALLBACKS = ("bybit", "okx")     # urutan fallback saat Binance gagal

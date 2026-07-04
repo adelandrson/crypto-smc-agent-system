@@ -17,6 +17,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
+# DNS via 1.1.1.1 utk host bursa (hindari DNS-block ISP mis. Indonesia -> Binance/Bybit timeout).
+# Berlaku utk urllib DAN ccxt (patch socket global). Nonaktif via env DOH_DISABLE=1.
+try:
+    from .dns_resolver import install as _install_doh
+    _install_doh()
+except Exception:  # noqa: BLE001
+    pass
+
 CANONICAL_TFS = ("5m", "15m", "1h", "4h", "1d")
 
 # CIRCUIT-BREAKER per-host: setelah beberapa kegagalan beruntun (mis. Binance mem-block IP kita krn
