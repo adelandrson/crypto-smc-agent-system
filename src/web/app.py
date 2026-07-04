@@ -334,21 +334,16 @@ def chart_api(symbol: str, tf: str = "1h"):
 
 
 # ── Agent dashboard (dry-run) ────────────────────────────────────────────────
-_price_cache: dict = {"ts": 0.0, "prices": {}}
+_price_cache: dict = {"ts": 0.0, "prices": {}, "last_try": 0.0, "refreshing": False}
 _price_adapter = None    # FallbackAdapter (Binance→ccxt Bybit/OKX) — lazy
 
 
-def _live_prices() -> dict:
-    """Harga mark SEMUA perp Binance dlm 1 request, di-cache 3 dtk (server-side). Dipakai utk
-    'harga terkini' + unrealized PnL live di halaman Agent tanpa membanjiri Binance saat UI
-    polling cepat (1-2 dtk)."""
+def _refresh_prices_bg() -> None:
+    """Ambil harga di THREAD LATAR — TAK PERNAH memblokir response. Saat semua bursa down,
+    panggilan all_prices() pertama bisa makan belasan detik (http 4s + ccxt 5s + 5s) sebelum
+    circuit-breaker terbuka; kalau ini terjadi di jalur request, /api/agent menggantung dan
+    seluruh halaman Agent (polling 1 dtk) tampak mati."""
     import time as _t
-    now = _t.monotonic()
-    if _price_cache["prices"] and now - _price_cache["ts"] < 3.0:
-        return _price_cache["prices"]
-    if now - _price_cache.get("last_try", 0) < 2.0:      # jangan retry beruntun saat Binance down
-        return _price_cache["prices"]
-    _price_cache["last_try"] = now
     try:
         from src.smc.market import FallbackAdapter
         global _price_adapter
@@ -357,10 +352,27 @@ def _live_prices() -> dict:
         px = _price_adapter.all_prices()                  # Binance ticker → fallback ccxt Bybit/OKX
         if px:
             _price_cache["prices"] = px
-            _price_cache["ts"] = now
+            _price_cache["ts"] = _t.monotonic()
     except Exception:  # noqa: BLE001
-        pass                                              # semua bursa down -> pakai cache lama, JANGAN hang API
-    return _price_cache["prices"]
+        pass                                              # semua bursa down -> pakai cache lama
+    finally:
+        _price_cache["refreshing"] = False
+
+
+def _live_prices() -> dict:
+    """Harga mark SEMUA perp, di-cache 3 dtk. NON-BLOCKING: kembalikan cache SEKETIKA, refresh
+    di background bila kadaluarsa. Response API tak pernah menunggu jaringan → halaman Agent tetap
+    responsif meski semua bursa down."""
+    import time as _t
+    import threading
+    now = _t.monotonic()
+    fresh = _price_cache["prices"] and now - _price_cache["ts"] < 3.0
+    if not fresh and not _price_cache.get("refreshing") \
+            and now - _price_cache.get("last_try", 0) >= 2.0:   # jangan retry beruntun saat bursa down
+        _price_cache["last_try"] = now
+        _price_cache["refreshing"] = True
+        threading.Thread(target=_refresh_prices_bg, daemon=True).start()
+    return _price_cache["prices"]                          # selalu instan (cache lama bila perlu)
 
 
 @app.get("/api/agent")
