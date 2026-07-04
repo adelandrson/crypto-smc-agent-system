@@ -230,7 +230,8 @@ def chart_api(symbol: str, tf: str = "1h"):
         idx = ob.get("index")
         t = sec(raw[idx][0]) if isinstance(idx, int) and 0 <= idx < len(raw) else start
         obs.append({"top": ob["top"], "bottom": ob["bottom"], "type": ob.get("type"),
-                    "status": ob.get("status"), "from": t, "akum": ob.get("kind") == "base"})
+                    "status": ob.get("status"), "from": t, "akum": ob.get("kind") == "base",
+                    "vol": bool(ob.get("vol_confirmed")), "retests": ob.get("retests", 0)})
     obs.sort(key=lambda o: (o["type"], o["bottom"]))     # GABUNG OB setipe yg tumpang-tindih -> 1 zona
     mo = []
     for o in obs:
@@ -239,6 +240,8 @@ def chart_api(symbol: str, tf: str = "1h"):
             m["top"], m["bottom"] = max(m["top"], o["top"]), min(m["bottom"], o["bottom"])
             m["from"] = min(m["from"], o["from"])
             m["akum"] = bool(m.get("akum") or o.get("akum"))    # OB+base gabung -> tetap tandai akumulasi
+            m["vol"] = bool(m.get("vol") or o.get("vol"))       # gabung: vol-confirmed bila salah satu ya
+            m["retests"] = max(m.get("retests", 0), o.get("retests", 0))
             if o.get("status") != "mitigated":
                 m["status"] = o["status"]
         else:

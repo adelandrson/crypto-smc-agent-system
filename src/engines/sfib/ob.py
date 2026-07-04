@@ -21,6 +21,33 @@ def _is_bullish(b: Bar) -> bool:
     return b.close >= b.open
 
 
+def _vol_confirmed(bars: Sequence[Bar], idx: int, lookback: int = 20, mult: float = 1.2) -> bool:
+    """Apakah volume bar[idx] DI ATAS rata-rata volume LOKAL (`lookback` bar sebelumnya)? Konfirmasi
+    permintaan/distribusi institusi — rule user: gerak keluar OB/base wajib bervolume tinggi."""
+    if not (0 < idx < len(bars)):
+        return False
+    vols = [bars[k].volume for k in range(max(0, idx - lookback), idx) if bars[k].volume]
+    if not vols:
+        return False
+    avg = sum(vols) / len(vols)
+    return avg > 0 and (bars[idx].volume or 0.0) >= mult * avg
+
+
+def _count_retests(bars: Sequence[Bar], top: float, bottom: float, start: int) -> int:
+    """Berapa kali harga KEMBALI menyentuh zona [bottom,top] setelah `start` (tiap masuk = 1 retest).
+    Zona yg sering di-retest & bertahan = OB kuat (rule user: 'sering di-retest dan memantul')."""
+    retests = 0
+    inside = False
+    for i in range(start, len(bars)):
+        touch = bars[i].low <= top and bars[i].high >= bottom
+        if touch and not inside:
+            retests += 1
+            inside = True
+        elif not touch:
+            inside = False
+    return retests
+
+
 def _impulse_has_fvg(bars: Sequence[Bar], a_idx: int, b_idx: int, want_bull: bool) -> bool:
     """Apakah impuls [a_idx..b_idx] meninggalkan FVG (3-candle imbalance) searah? (rule validitas OB:
     OB sah butuh displacement yg meninggalkan FVG — tanpa FVG, OB lemah)."""
@@ -42,10 +69,11 @@ def _leg_broke_structure(swings: Sequence[Pivot], k: int, extreme: Pivot) -> boo
 
 
 def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
-                        lookback: int = 10, max_blocks: int = 4,
+                        lookback: int = 10, max_blocks: int = 6,
                         atr: Optional[Sequence[float]] = None,
                         refine_mult: float = 1.5, require_bos: bool = True,
-                        require_fvg: bool = True) -> List[dict]:
+                        require_fvg: bool = True, require_volume: bool = False,
+                        vol_mult: float = 1.2) -> List[dict]:
     """Find the most recent VALID OB zones from the swing sequence.
 
     For each confirmed swing leg (O->E), the OB is the last opposite-colour candle at or before the
@@ -78,6 +106,11 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
         # RULE FVG: impuls wajib meninggalkan imbalance
         has_fvg = _impulse_has_fvg(bars, origin.index, extreme.index, want_bull)
         if require_fvg and not has_fvg:
+            continue
+        # RULE VOLUME: gerak keluar OB (impuls) wajib bervolume DI ATAS rata-rata lokal (konfirmasi)
+        vol_ok = any(_vol_confirmed(bars, i, mult=vol_mult)
+                     for i in range(origin.index, min(extreme.index, last_idx) + 1))
+        if require_volume and not vol_ok:
             continue
         start = max(0, origin.index - lookback)
         end = origin.index
@@ -121,6 +154,8 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
             "refined": refined,
             "has_fvg": has_fvg,           # displacement/imbalance ada -> OB kuat
             "has_bos": True,              # lolos gerbang BOS (kalau tidak, sudah di-skip di atas)
+            "vol_confirmed": vol_ok,      # gerak keluar bervolume tinggi (permintaan/distribusi nyata)
+            "retests": _count_retests(bars, top, bottom, ob_bar + 1),   # sering di-retest = kuat
             "mitigated": mitigated,
             "broken": broken,
             "status": "broken" if broken else ("mitigated" if mitigated else "fresh"),
@@ -128,8 +163,9 @@ def detect_order_blocks(bars: Sequence[Bar], swings: Sequence[Pivot],
     return out
 
 
-def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 4,
-                 range_mult: float = 1.5, max_zones: int = 8) -> List[dict]:
+def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 3,
+                 range_mult: float = 1.5, max_zones: int = 10,
+                 require_volume: bool = False, vol_mult: float = 1.2) -> List[dict]:
     """Zona AKUMULASI/DISTRIBUSI (sideways base) — 'pijakan' di TENGAH tren, pelengkap OB klasik.
 
     OB klasik hanya menandai origin swing (ekstrem). Padahal di tengah tren ada cluster sideways
@@ -160,7 +196,9 @@ def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 4,
         if (j - i + 1) >= min_len and j + 1 < n:
             b = bars[j + 1]                       # bar breakout
             kind = "bull" if b.close > hi else ("bear" if b.close < lo else None)
-            if kind is not None:
+            # RULE VOLUME: breakout dari base wajib bervolume DI ATAS rata-rata lokal (konfirmasi)
+            vol_ok = _vol_confirmed(bars, j + 1, mult=vol_mult)
+            if kind is not None and (vol_ok or not require_volume):
                 mitigated = False
                 broken = False
                 for t in range(j + 2, n):
@@ -179,6 +217,8 @@ def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 4,
                     "end_index": j,
                     "bars": j - i + 1,
                     "kind": "base",
+                    "vol_confirmed": vol_ok,      # breakout bervolume tinggi = permintaan/distribusi nyata
+                    "retests": _count_retests(bars, hi, lo, j + 2),
                     "mitigated": mitigated,
                     "broken": broken,
                     "status": "broken" if broken else ("mitigated" if mitigated else "fresh"),

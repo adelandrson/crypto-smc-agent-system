@@ -159,3 +159,16 @@ def test_ob_requires_fvg():
     swings = significant_swings(bars, atr, 5, 0.5)
     assert detect_order_blocks(bars, swings, require_fvg=True) == []
     assert detect_order_blocks(bars, swings, require_fvg=False)
+
+
+def test_vol_confirmed_and_retests():
+    from sfib.ob import _vol_confirmed, _count_retests
+    from sfib.core import Bar
+    def bar(i, o, h, l, c, v): return Bar(index=i, time=i, open=o, high=h, low=l, close=c, volume=v)
+    bars = [bar(i, 100, 101, 99, 100, 10.0) for i in range(20)] + [bar(20, 100, 105, 100, 104, 20.0)]
+    assert _vol_confirmed(bars, 20) is True           # 20 >= 1.2 x avg(10)
+    assert _vol_confirmed(bars, 20, mult=3.0) is False # 20 < 3 x 10
+    zb = [bar(0, 100, 100.5, 99.5, 100, 1), bar(1, 103, 104, 102, 103, 1),
+          bar(2, 100, 100.5, 99.6, 100, 1), bar(3, 105, 106, 104, 105, 1),
+          bar(4, 100, 100.4, 99.7, 100, 1)]
+    assert _count_retests(zb, 101, 99, 0) == 3         # masuk zona 3x (bar0,2,4)
