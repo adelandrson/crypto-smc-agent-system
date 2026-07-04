@@ -116,13 +116,17 @@ def analyze_confluence(candles_or_bars, fvg_config=None, fib_config=None,
     vol_state = mom.get("vol_state") if mom.get("ok") else None
     ranging = mom.get("ranging", False) if mom.get("ok") else False
     volume_ok = mom.get("volume_ok", True) if mom.get("ok") else True
-    # A+ extended: overlap Fib×FVG OR OB retest OR liquidity sweep OR MTF divergence (selaras arah)
+    # A+ extended: overlap Fib×FVG OR OB/base retest OR liquidity sweep OR MTF divergence (selaras arah)
     ob_boost = ob_retest is not None and fvg_score != 0 and fvg_score == fib_score
+    # zona retest KUAT (vol-confirmed / sering-retest) searah FVG = booster A+ meski Fib≠FVG persis
+    strong_zone = bool(ob_retest and (ob_retest.get("vol_confirmed") or ob_retest.get("retests", 0) >= 2))
+    zone_boost = strong_zone and fvg_score != 0 and (
+        (fvg_score > 0) == (ob_retest.get("type") == "bull"))
     sweep_boost = bool(liquidity_sweep and liquidity_sweep.get("swept") and fvg_score != 0
                        and liquidity_sweep.get("direction") == (1 if fvg_score > 0 else -1))
     mtf_boost = bool(mtf_div and mtf_div.get("mtf_score") and fvg_score != 0
                      and mtf_div.get("mtf_score") == (1 if fvg_score > 0 else -1))
-    high_confluence = high_confluence or ob_boost or sweep_boost or mtf_boost
+    high_confluence = high_confluence or ob_boost or zone_boost or sweep_boost or mtf_boost
     # confirmed = full_strong AND momentum aligns AND not ranging AND volume ok
     confirmed = (abs(full_score) >= 2 and momentum_score != 0
                  and momentum_score == (1 if full_score > 0 else -1)
@@ -141,9 +145,11 @@ def analyze_confluence(candles_or_bars, fvg_config=None, fib_config=None,
         "in_golden_pocket": in_gp,
         "structure": structure,        # trend + BOS/CHoCH
         "order_blocks": fib.get("order_blocks") if fib.get("ok") else [],
-        "ob_retest": ob_retest,
+        "bases": fib.get("bases") if fib.get("ok") else [],   # zona akumulasi/distribusi (sideways+vol)
+        "ob_retest": ob_retest,               # zona OB/base yg sedang di-retest (vol/retest = kuat)
         "liquidity_sweep": liquidity_sweep,   # EQH/EQL stop-hunt (booster A+ bila selaras)
         "liquidity_pools": fib.get("liquidity_pools") if fib.get("ok") else None,  # target TP struktur
+        "liquidity_map": fib.get("liquidity_map") if fib.get("ok") else None,      # BSL/SSL (target TP)
         "fib_extensions": fib.get("fib_extensions") if fib.get("ok") else None,    # target TP struktur
         "analysis_score": analysis_score,     # FVG + Fib (range -2..+2)
         "full_score": full_score,             # + OI + FR (range -4..+4)

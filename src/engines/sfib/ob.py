@@ -230,21 +230,30 @@ def detect_bases(bars: Sequence[Bar], atr: Sequence[float], min_len: int = 3,
 
 
 def retest(price: float, direction: int, order_blocks: List[dict],
-           near_pct: float = 0.5) -> Optional[dict]:
-    """Is `price` retesting a fresh OB aligned with `direction`?
+           near_pct: float = 0.6, bases: Optional[List[dict]] = None) -> Optional[dict]:
+    """Is `price` retesting a VALID zone (OB or accumulation base) aligned with `direction`?
 
-    direction +1 (long) -> a fresh bullish OB within near_pct% of price.
-    direction -1 (short) -> a fresh bearish OB within near_pct% of price.
-    Returns the matched OB or None. Only fresh (unmitigated) OBs qualify — a
-    mitigated OB has already done its job and is lower quality.
+    Aligned = bull zone for long / bear zone for short. VALID = not `broken` (a zone that price has
+    been retesting & holding — even if `mitigated` — is a real demand/supply per SMC, especially if
+    vol-confirmed & often retested). `price` must be inside the zone or within `near_pct`% of its mid.
+    Returns the STRONGEST matching zone (vol_confirmed then retests then closeness), or None.
     """
-    if not price or not order_blocks:
+    if not price:
         return None
     want = "bull" if direction > 0 else "bear"
-    for ob in order_blocks:
-        if ob["status"] != "fresh" or ob["type"] != want:
+    cands = [z for z in list(order_blocks or []) + list(bases or [])
+             if z.get("type") == want and z.get("status") != "broken"]
+    best = None
+    best_key = None
+    for z in cands:
+        top, bottom, mid = z.get("top"), z.get("bottom"), z.get("mid", price)
+        if top is None or bottom is None:
             continue
-        dist_pct = abs(price - ob["mid"]) / price * 100.0
-        if dist_pct <= near_pct:
-            return ob
-    return None
+        inside = bottom <= price <= top
+        dist_pct = abs(price - mid) / price * 100.0
+        if not (inside or dist_pct <= near_pct):
+            continue
+        key = (bool(z.get("vol_confirmed")), int(z.get("retests", 0)), -dist_pct)  # kuat dulu
+        if best_key is None or key > best_key:
+            best, best_key = z, key
+    return best

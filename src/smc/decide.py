@@ -86,7 +86,11 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     price = c["price"]
     in_fvg = bool(fvg and fvg.get("bottom") is not None and fvg.get("top") is not None
                   and fvg["bottom"] <= price <= fvg["top"])
-    in_zone = in_fvg or c.get("in_ote") or c.get("in_golden_pocket")
+    # zona ENTRY valid juga = retest OB/base searah (demand utk long / supply utk short) — kini
+    # indikator OB/akumulasi ikut jadi acuan area limit-order, bukan hanya FVG/OTE
+    zr = c.get("ob_retest")
+    in_ob = bool(zr and zr.get("type") == ("bull" if direction > 0 else "bear"))
+    in_zone = in_fvg or c.get("in_ote") or c.get("in_golden_pocket") or in_ob
     entry, order_type = entry_plan(direction, price, fvg, in_zone,
                                    max_pullback=cfg.get("limit_max_pullback", 0.05),
                                    min_pullback=cfg.get("limit_min_pullback", 0.0015))
@@ -117,8 +121,17 @@ def decide(symbol: str, candles: list, fr_score: int, oi_score: int, equity: flo
     # (pool likuiditas / opposing OB / Fib extension), fallback R-multiple bila struktur kurang.
     levels = swing_tp_count(c.get("vol_state"), c.get("atr_percentile")) if mode == "swing" else 1
     n_tp = 1 if mode == "scalp" else levels
-    tp_px = structure_tp_prices(direction, entry, sl, order_blocks=c.get("order_blocks"),
-                                liquidity_pools=c.get("liquidity_pools"),
+    # target TP dari STRUKTUR: opposing OB/base + likuiditas (EQH/EQL + BSL/SSL semua swing) + Fib ext
+    _lm = c.get("liquidity_map") or {}
+    _lp = c.get("liquidity_pools") or {}
+    liq_targets = {
+        "eqh": list(_lp.get("eqh") or []) + [b["level"] for b in (_lm.get("bsl") or [])],
+        "eql": list(_lp.get("eql") or []) + [s["level"] for s in (_lm.get("ssl") or [])],
+    }
+    ob_targets = [o for o in (c.get("order_blocks") or []) if o.get("status") != "broken"] + \
+                 [b for b in (c.get("bases") or []) if b.get("status") != "broken"]
+    tp_px = structure_tp_prices(direction, entry, sl, order_blocks=ob_targets,
+                                liquidity_pools=liq_targets,
                                 fib_extensions=c.get("fib_extensions"), n=n_tp)
     tps = tp_targets(direction, entry, sl, mode=mode, levels=levels, prices=tp_px)
     # SHORT crime-pump: TP TUNGGAL 100% di ~<=1% DI ATAS harga pra-pump (retrace penuh)

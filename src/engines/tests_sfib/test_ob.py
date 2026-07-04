@@ -46,9 +46,18 @@ def test_ob_retest_finds_fresh_aligned_block():
     assert retest(120, 1, ob, near_pct=1.0) is None          # too far
 
 
-def test_ob_retest_ignores_mitigated():
-    ob = [{"type": "bull", "top": 98, "bottom": 96, "mid": 97, "status": "mitigated"}]
-    assert retest(97, 1, ob, near_pct=2.0) is None           # mitigated -> not fresh
+def test_ob_retest_valid_zones_rejects_broken():
+    # metodologi baru: zona MITIGATED (sering di-retest & bertahan) tetap valid retest target;
+    # hanya BROKEN yg invalid + arah salah ditolak.
+    ob_mit = [{"type": "bull", "top": 98, "bottom": 96, "mid": 97, "status": "mitigated"}]
+    assert retest(97, 1, ob_mit, near_pct=2.0) is not None    # mitigated (bertahan) = valid
+    assert retest(97, -1, ob_mit, near_pct=2.0) is None       # arah salah
+    ob_brk = [{"type": "bull", "top": 98, "bottom": 96, "mid": 97, "status": "broken"}]
+    assert retest(97, 1, ob_brk, near_pct=2.0) is None        # broken = invalid
+    # zona KUAT (vol_confirmed / retests) dipilih dulu saat beberapa cocok
+    zones = [{"type": "bull", "top": 98, "bottom": 96, "mid": 97, "status": "mitigated", "retests": 0},
+             {"type": "bull", "top": 98, "bottom": 96, "mid": 97, "status": "mitigated", "vol_confirmed": True, "retests": 3}]
+    assert retest(97, 1, zones, near_pct=2.0)["vol_confirmed"] is True
 
 
 def test_ob_broken_when_close_through_far_edge():

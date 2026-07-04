@@ -112,12 +112,13 @@ def analyze(bars_input, config: Optional[dict] = None) -> dict:
     if OTE[0] <= fib["retracement_ratio_now"] <= OTE[1]:
         fib_score = 1 if fib["direction"] == "up" else -1
 
-    # OB retest: price back at a fresh OB aligned with the active leg (A+ booster)
+    # OB/base retest: price back at a VALID (non-broken) zone searah leg aktif (A+ booster) —
+    # kini termasuk zona akumulasi/base + prioritas zona vol-confirmed & sering-retest
     ob_retest = None
-    if order_blocks:
+    if order_blocks or bases:
         from .ob import retest as _retest
         direction = 1 if fib["direction"] == "up" else -1
-        ob_retest = _retest(price, direction, order_blocks)
+        ob_retest = _retest(price, direction, order_blocks, bases=bases)
 
     # Liquidity: BSL/SSL (setiap swing high/low) + EQH/EQL (pool terkuat) + sweep (booster A+)
     from .sweep import detect_sweep, liquidity_map
